@@ -90,10 +90,10 @@ Die Schritte 1 bis 6 machst du nur ein einziges Mal.
 
 ### Schritt 2: Code hochladen (am PC, einmalig)
 
-Im Projektordner (`DEIN-GITHUB-NAME` ersetzen):
+Im Projektordner:
 
 ```powershell
-git remote add origin https://github.com/DEIN-GITHUB-NAME/schul-briefing.git
+git remote add origin https://github.com/dimahdgamer/schul-briefing.git
 git push -u origin main
 ```
 
@@ -125,11 +125,11 @@ Gibt `uname -m` den Wert `armv7l` aus, läuft auf dem Pi ein 32-Bit-System. Dann
 muss im Workflow eine Zeile ergänzt werden, sag Bescheid. Braucht `docker ps` ein
 sudo: `sudo usermod -aG docker $USER`, abmelden, neu anmelden.
 
-**4.2 Bei GitHub anmelden.** `DEIN-GITHUB-NAME` ersetzen. Bei der Passwortabfrage das
+**4.2 Bei GitHub anmelden.** Bei der Passwortabfrage das
 Token aus Schritt 3 einfügen (es wird beim Einfügen nicht angezeigt):
 
 ```bash
-docker login ghcr.io -u DEIN-GITHUB-NAME
+docker login ghcr.io -u dimahdgamer
 ```
 
 **4.3 Ordner anlegen und die Pi-Dateien aus dem Image holen:**
@@ -137,7 +137,7 @@ docker login ghcr.io -u DEIN-GITHUB-NAME
 ```bash
 mkdir -p ~/schul-briefing && cd ~/schul-briefing
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/out" --entrypoint sh \
-  ghcr.io/DEIN-GITHUB-NAME/schul-briefing:latest -c 'cp -r /app/deploy/. /out/'
+  ghcr.io/dimahdgamer/schul-briefing:latest -c 'cp -r /app/deploy/. /out/'
 ls -a
 ```
 
