@@ -12,19 +12,23 @@ import * as login from "./views/login.js";
 
 const ROUTES = { heute, woche, aufgaben, noten, post, verlauf, einstellungen };
 
-const TABS = [
-  ["heute", "Heute", "house"],
-  ["woche", "Woche", "calendar-dots"],
-  ["aufgaben", "Aufgaben", "notebook"],
-  ["noten", "Noten", "chart-line-up"],
-  ["post", "Post", "envelope-simple"],
-];
+// Gibt die Schule keine Noten frei, nimmt der Verlauf den Platz in der Tab-Leiste ein
+function tabs() {
+  return [
+    ["heute", "Heute", "house"],
+    ["woche", "Woche", "calendar-dots"],
+    ["aufgaben", "Aufgaben", "notebook"],
+    features.grades ? ["noten", "Noten", "chart-line-up"] : ["verlauf", "Verlauf", "clock-counter-clockwise"],
+    ["post", "Post", "envelope-simple"],
+  ];
+}
 
 const root = document.getElementById("root");
 let shellReady = false;
 let cleanup = null;
 let lastRender = 0;
 let renderToken = 0;
+let features = { grades: true };
 
 function parseHash() {
   const hash = location.hash.replace(/^#\/?/, "");
@@ -39,7 +43,7 @@ export function navigate(hash, { replace = false } = {}) {
 }
 
 function shell() {
-  const sideLinks = TABS.map(
+  const sideLinks = tabs().filter(([key]) => key !== "verlauf").map(
     ([key, label, ic]) => `<a class="side-link" href="#/${key}" data-route="${key}">${icon(ic)}<span>${label}</span></a>`
   ).join("");
   root.innerHTML = `
@@ -65,7 +69,7 @@ function shell() {
         <main class="main" id="main" tabindex="-1"></main>
       </div>
       <nav class="tabbar" aria-label="Hauptnavigation">
-        ${TABS.map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span></a>`).join("")}
+        ${tabs().map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span></a>`).join("")}
       </nav>
     </div>`;
 
@@ -159,6 +163,7 @@ async function boot() {
   } catch {
     me = { authenticated: true }; // offline: den gecachten Stand zeigen
   }
+  if (me.features) features = me.features;
   if (!me.authenticated) {
     navigate("#/login", { replace: true });
   } else {

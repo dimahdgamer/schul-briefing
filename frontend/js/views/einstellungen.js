@@ -82,6 +82,7 @@ function statusSection(status) {
         <button class="btn small" data-action="sync">${icon("arrows-clockwise", "sm")}Abrufen</button>
       </div>
       ${status.last_error ? `<div class="field"><div class="notice red" style="width:100%">${icon("warning-circle")}<p>${esc(status.last_error)}</p></div></div>` : ""}
+      ${(status.disabled_modules || []).length ? `<div class="field"><div class="field-help">Bei deiner Schule nicht freigeschaltet: ${status.disabled_modules.map((k) => esc(MODULE_NAMES[k] || k)).join(", ")}</div></div>` : ""}
       ${moduleErrors.length ? `<div class="field"><div class="field-help">Nicht verfügbar: ${moduleErrors.map(([k, v]) => `${esc(MODULE_NAMES[k] || k)} (${esc(v)})`).join(", ")}</div></div>` : ""}
       ${syncs ? `<div class="field stack"><table class="grade-table"><thead><tr><th>Abruf</th><th>Auslöser</th><th class="num">Ergebnis</th></tr></thead><tbody>${syncs}</tbody></table></div>` : ""}
     </div>`;
@@ -107,6 +108,7 @@ export async function render(main, params, ctx) {
   if (!ctx.isCurrent()) return;
   const s = settings;
   const theme = readTheme();
+  const gradesOn = !(status.disabled_modules || []).includes("grades");
 
   main.innerHTML = `
     <header class="view-head reveal">
@@ -160,8 +162,8 @@ export async function render(main, params, ctx) {
     <section class="section reveal" style="--i:4">
       <h2 class="section-title">Sofort melden</h2>
       <div class="card">
-        ${NOTIFY.map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`).join("")}
-        <div class="field">
+        ${NOTIFY.filter(([key]) => gradesOn || key !== "notify_grades").map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`).join("")}
+        <div class="field" ${gradesOn ? "" : "hidden"}>
           <div><div class="field-label">Notenwert in der Nachricht</div><div class="field-help">Aus: nur „Neue Note in Mathe“, damit die Note nicht auf dem Sperrbildschirm steht</div></div>
           ${toggle("grade_values_in_push", s, "Notenwert in der Nachricht")}
         </div>

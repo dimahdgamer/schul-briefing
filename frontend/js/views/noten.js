@@ -120,6 +120,13 @@ export async function render(main, params, ctx) {
   const usesPoints = data.overall === null && data.overall_points !== null;
   const overall = usesPoints ? data.overall_points : data.overall;
 
+  if (data.available === false) {
+    main.innerHTML = `
+      <header class="view-head reveal"><h1 class="display">Noten</h1></header>
+      <div class="empty reveal"><span class="serif">Nicht freigeschaltet</span>Deine Schule zeigt Noten in Schulmanager nicht an. Sobald sie das tut, erscheinen sie hier automatisch.</div>`;
+    return;
+  }
+
   if (!subjects.length) {
     main.innerHTML = `
       <header class="view-head reveal"><h1 class="display">Noten</h1></header>

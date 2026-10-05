@@ -1,94 +1,77 @@
 // Service Worker: Push-Empfang, Offline-Cache, Klick auf Benachrichtigungen.
+//
+// CSS, JS und Schriften kommen versioniert unter /a/<build>/… und ändern sich nie,
+// sie werden deshalb direkt aus dem Cache bedient. Die Startseite und die API
+// kommen immer zuerst aus dem Netz, damit Updates und neue Daten sofort ankommen.
 
-const VERSION = "v1";
-const SHELL_CACHE = `shell-${VERSION}`;
-const DATA_CACHE = `data-${VERSION}`;
-const SHELL = [
-  "/",
-  "/index.html",
-  "/css/app.css",
-  "/js/app.js",
-  "/js/api.js",
-  "/js/ui.js",
-  "/js/push.js",
-  "/js/views/heute.js",
-  "/js/views/woche.js",
-  "/js/views/aufgaben.js",
-  "/js/views/noten.js",
-  "/js/views/post.js",
-  "/js/views/verlauf.js",
-  "/js/views/einstellungen.js",
-  "/js/views/login.js",
-  "/icons/sprite.svg",
-  "/icons/icon-192.png",
-  "/icons/badge-96.png",
-  "/fonts/Geist-Variable.woff2",
-  "/fonts/GeistMono-Variable.woff2",
-  "/fonts/InstrumentSerif-Regular.woff2",
-  "/fonts/InstrumentSerif-Italic.woff2",
-  "/manifest.webmanifest",
-];
+const CACHE = "schule-v2";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.add("/")).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => ![SHELL_CACHE, DATA_CACHE].includes(k)).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
+
+function buildOf(url) {
+  const match = url.pathname.match(/^\/a\/([^/]+)\//);
+  return match ? match[1] : null;
+}
+
+// Wenn eine neue Version geladen wird, die Dateien älterer Versionen wegräumen
+async function pruneOldBuilds(cache, build) {
+  const keys = await cache.keys();
+  await Promise.all(
+    keys.filter((request) => {
+      const old = buildOf(new URL(request.url));
+      return old && old !== build;
+    }).map((request) => cache.delete(request))
+  );
+}
+
+async function cacheFirst(request, url) {
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response.ok) {
+    await cache.put(request, response.clone());
+    const build = buildOf(url);
+    if (build) pruneOldBuilds(cache, build);
+  }
+  return response;
+}
+
+async function networkFirst(request, fallbackKey) {
+  const cache = await caches.open(CACHE);
+  try {
+    const response = await fetch(request);
+    if (response.ok) await cache.put(fallbackKey || request, response.clone());
+    return response;
+  } catch {
+    const cached = await cache.match(fallbackKey || request);
+    return cached || Response.error();
+  }
+}
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/cal/")) return;
 
-  // API: erst Netz, bei Ausfall der zuletzt geladene Stand
-  if (url.pathname.startsWith("/api/")) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(DATA_CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match(request).then((cached) => cached || Response.error()))
-    );
-    return;
+  if (url.pathname.startsWith("/a/") || url.pathname.startsWith("/fonts/") || url.pathname.startsWith("/icons/")) {
+    event.respondWith(cacheFirst(request, url));
+  } else if (request.mode === "navigate") {
+    event.respondWith(networkFirst(request, "/"));
+  } else {
+    event.respondWith(networkFirst(request));
   }
-
-  // Schriften und Icons ändern sich nie: direkt aus dem Cache
-  if (url.pathname.startsWith("/fonts/") || url.pathname.startsWith("/icons/")) {
-    event.respondWith(
-      caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-        const copy = response.clone();
-        if (response.ok) caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
-        return response;
-      }))
-    );
-    return;
-  }
-
-  // App-Code: erst Netz (damit Updates sofort greifen), offline aus dem Cache
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
-        }
-        return response;
-      })
-      .catch(() =>
-        caches.match(request, { ignoreSearch: true }).then((cached) => cached || caches.match("/index.html"))
-      )
-  );
 });
 
 self.addEventListener("push", (event) => {

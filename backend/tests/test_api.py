@@ -83,7 +83,42 @@ def test_login_rate_limit(client):
 
 
 def test_static_frontend(client):
-    http, _ = client
-    assert "<div id=\"root\">" in http.get("/").text
+    http, main = client
+    page = http.get("/")
+    assert "<div id=\"root\">" in page.text
+    assert page.headers["cache-control"] == "no-cache"
+    prefix = f"/a/{main.BUILD_ID}"
+    assert f'src="{prefix}/js/app.js"' in page.text
+    assert f'href="{prefix}/css/app.css"' in page.text
+
+    asset = http.get(f"{prefix}/js/app.js")
+    assert asset.status_code == 200 and "javascript" in asset.headers["content-type"]
+    assert "immutable" in asset.headers["cache-control"]
+    stale = http.get("/a/altversion/js/app.js")
+    assert stale.status_code == 200 and stale.headers["cache-control"] == "no-cache"
+    assert http.get(f"{prefix}/../backend/app/config.py").status_code == 404
+    assert http.get(f"{prefix}/%2e%2e/%2e%2e/README.md").status_code == 404
+
     assert http.get("/sw.js").headers["content-type"].startswith("text/javascript")
     assert http.get("/manifest.webmanifest").status_code == 200
+
+
+def test_disabled_module_is_not_an_error(client, monkeypatch):
+    http, main = client
+    sync = main.service.sync
+    original = sync._fetch_raw
+
+    async def without_grades(today):
+        raw = await original(today)
+        raw["grades"] = (False, None, 403)
+        return raw
+
+    monkeypatch.setattr(sync, "_fetch_raw", without_grades)
+    result = asyncio.run(sync.run("test"))
+    assert result["ok"] and "grades" not in result["module_errors"]
+
+    http.post("/api/login", json={"password": "geheim"})
+    assert http.get("/api/me").json()["features"] == {"grades": False}
+    assert http.get("/api/grades").json()["available"] is False
+    status = http.get("/api/status").json()
+    assert status["disabled_modules"] == ["grades"] and status["module_errors"] == {}

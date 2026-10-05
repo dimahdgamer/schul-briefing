@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import secrets
@@ -12,7 +13,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -48,11 +49,43 @@ app.add_middleware(
 )
 
 
+NO_CACHE_PATHS = {"/", "/index.html", "/sw.js", "/manifest.webmanifest"}
+
+
+def _build_id() -> str:
+    """Prüfsumme über alle Frontend-Dateien: ändert sich mit jedem Update."""
+    digest = hashlib.sha1()
+    for path in sorted(cfg.static_dir.rglob("*")):
+        if path.is_file():
+            digest.update(path.relative_to(cfg.static_dir).as_posix().encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
+
+
+# CSS, JS und Schriften werden unter /a/<build>/… ausgeliefert. Cloudflare und der
+# Browser dürfen sie dann beliebig lange cachen, weil jedes Update neue URLs erzeugt.
+# Relative Imports in den JS-Modulen erben das Präfix automatisch.
+BUILD_ID = _build_id()
+ASSET_PREFIX = f"/a/{BUILD_ID}"
+
+
+def _index_html() -> str:
+    html = (cfg.static_dir / "index.html").read_text(encoding="utf-8")
+    for marker in ('href="/css/', 'src="/js/', 'href="/fonts/'):
+        html = html.replace(marker, marker.replace('"/', f'"{ASSET_PREFIX}/'))
+    return html
+
+
+INDEX_HTML = _index_html()
+
+
 @app.middleware("http")
 async def cache_headers(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/api/") or path in ("/", "/index.html", "/sw.js", "/manifest.webmanifest"):
+    if path.startswith("/a/"):
+        pass  # Versionierte Dateien setzen ihren Cache-Header selbst
+    elif path.startswith(("/api/", "/js/", "/css/")) or path in NO_CACHE_PATHS:
         response.headers["Cache-Control"] = "no-cache"
     elif path.startswith(("/fonts/", "/icons/")):
         response.headers["Cache-Control"] = "public, max-age=2592000"
@@ -101,7 +134,11 @@ async def logout(request: Request) -> dict[str, Any]:
 
 @app.get("/api/me")
 async def me(request: Request) -> dict[str, Any]:
-    return {"authenticated": bool(request.session.get("auth")), "demo": cfg.demo}
+    authenticated = bool(request.session.get("auth"))
+    result: dict[str, Any] = {"authenticated": authenticated, "demo": cfg.demo}
+    if authenticated:
+        result["features"] = service.features()
+    return result
 
 
 # ── Daten ────────────────────────────────────────────────────────────
@@ -153,6 +190,7 @@ async def grades() -> dict[str, Any]:
     averages = [s["average"] for s in subjects if s.get("average") is not None and s["system"] == 0]
     points = [s["average"] for s in subjects if s.get("average") is not None and s["system"] == 1]
     return {
+        "available": service.features()["grades"],
         "subjects": subjects,
         "overall": round(sum(averages) / len(averages), 2) if averages else None,
         "overall_points": round(sum(points) / len(points), 2) if points else None,
@@ -308,6 +346,22 @@ async def health() -> JSONResponse:
 
 
 # ── Frontend ─────────────────────────────────────────────────────────
+
+@app.get("/")
+@app.get("/index.html")
+async def index() -> HTMLResponse:
+    return HTMLResponse(INDEX_HTML)
+
+
+@app.get("/a/{build}/{path:path}")
+async def asset(build: str, path: str) -> FileResponse:
+    target = (cfg.static_dir / path).resolve()
+    if not target.is_relative_to(cfg.static_dir) or not target.is_file():
+        raise HTTPException(status_code=404)
+    # Fragt eine alte Seite nach einer alten Version, gibt es die aktuelle Datei, aber ungecacht
+    cache = "public, max-age=31536000, immutable" if build == BUILD_ID else "no-cache"
+    return FileResponse(target, headers={"Cache-Control": cache})
+
 
 @app.get("/sw.js")
 async def service_worker() -> FileResponse:

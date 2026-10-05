@@ -30,6 +30,7 @@ NOTIFY_SETTING = {
     "calendar": "notify_calendar",
 }
 MAX_SINGLE_PUSHES = 4
+DISABLED_STATUS = {403, 404}  # "Modul nicht gebucht / für diese Rolle nicht freigegeben"
 LOGIN_BACKOFF_SECONDS = 6 * 3600
 
 
@@ -84,11 +85,12 @@ class SyncService:
 
     # ── Abruf ────────────────────────────────────────────────────────
 
-    async def _fetch_raw(self, today: date) -> dict[str, tuple[bool, Any]]:
+    async def _fetch_raw(self, today: date) -> dict[str, tuple[bool, Any, int]]:
+        """Rohdaten je Modul als (erfolgreich, Daten, Status)."""
         start, end = self.lesson_window(today)
         if self.demo:
             raw = self.demo.fetch(today, start, end)
-            return {k: (True, v) for k, v in raw.items()}
+            return {k: (True, v, 200) for k, v in raw.items()}
 
         assert self.client is not None
         if not self.client.user:
@@ -116,8 +118,10 @@ class SyncService:
         results = await self.client.calls([calls[n] for n in names])
         out = {}
         for name, result in zip(names, results):
-            out[name] = (result.ok, result.data)
-            if not result.ok:
+            out[name] = (result.ok, result.data, result.status)
+            if result.status in DISABLED_STATUS:
+                log.debug("Modul %s ist nicht freigeschaltet (Status %s)", name, result.status)
+            elif not result.ok:
                 log.warning("Modul %s lieferte Status %s", name, result.status)
         return out
 
@@ -180,14 +184,19 @@ class SyncService:
         settings = self.db.settings()
         student_id = (self.client.student or {}).get("id") if self.client else 4711
         module_errors: dict[str, str] = {}
+        disabled: list[str] = []
         changes: list[diff.Change] = []
 
         normalized: dict[str, Any] = {}
         for module in MODULES:
-            ok, data = raw.get(module, (False, None))
+            ok, data, status = raw.get(module, (False, None, 0))
+            if status in DISABLED_STATUS:
+                # Modul ist für dieses Konto nicht freigeschaltet (z. B. Noten): kein Fehler
+                disabled.append(module)
+                continue
             self._write_raw(module, data)
             if not ok:
-                module_errors[module] = "nicht verfügbar"
+                module_errors[module] = f"nicht verfügbar (Status {status})"
                 continue
             try:
                 normalized[module] = self._normalize(module, data, student_id)
@@ -207,6 +216,7 @@ class SyncService:
         await self._record_and_push(changes, settings)
         self.db.sync_finished(sync_id, True, changes=len(changes),
                               error="; ".join(f"{k}: {v}" for k, v in module_errors.items()) or None)
+        self.db.set("disabled_modules", disabled)
         self._set_status(error=None, module_errors=module_errors)
         self.db.prune_events()
         log.info("Sync fertig (%s): %d Änderungen", trigger, len(changes))

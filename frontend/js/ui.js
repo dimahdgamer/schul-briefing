@@ -6,8 +6,11 @@ export function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 }
 
+// Relativ zum Modul auflösen, damit die Icons dieselbe Version wie der Code haben
+const SPRITE = new URL("../icons/sprite.svg", import.meta.url).pathname;
+
 export function icon(name, cls = "") {
-  return `<svg class="icon ${cls}" aria-hidden="true"><use href="/icons/sprite.svg#i-${name}"></use></svg>`;
+  return `<svg class="icon ${cls}" aria-hidden="true"><use href="${SPRITE}#i-${name}"></use></svg>`;
 }
 
 export const WEEKDAYS = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];

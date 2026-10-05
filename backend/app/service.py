@@ -179,6 +179,13 @@ class AppService:
 
     # ── Status ───────────────────────────────────────────────────────
 
+    def disabled_modules(self) -> list[str]:
+        return list(self.db.get("disabled_modules", []) or [])
+
+    def features(self) -> dict[str, bool]:
+        disabled = set(self.disabled_modules())
+        return {"grades": "grades" not in disabled}
+
     def status(self) -> dict[str, Any]:
         status = self.db.get("status", {}) or {}
         return {
@@ -186,6 +193,7 @@ class AppService:
             "last_attempt": status.get("last_attempt"),
             "last_error": status.get("last_error"),
             "module_errors": status.get("module_errors") or {},
+            "disabled_modules": self.disabled_modules(),
             "account": status.get("account") or self.sync.account(),
             "running": self.sync.running,
             "demo": self.cfg.demo,
