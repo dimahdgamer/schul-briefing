@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timedelta
 
 from .service import AppService
+from .sync import SNAPSHOT_VERSION
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,9 @@ class Scheduler:
 
     async def _loop(self) -> None:
         await asyncio.sleep(2)
-        if not self.app.db.last_successful_sync():
+        # Erster Start oder neue Version mit anderem Datenformat: sofort neu abrufen,
+        # sonst zeigt die App bis zum nächsten Abruf alte, anders aufbereitete Daten
+        if not self.app.db.last_successful_sync() or self.app.db.get("snapshot_version") != SNAPSHOT_VERSION:
             await self._poll("startup")
         while True:
             try:

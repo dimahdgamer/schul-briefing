@@ -33,7 +33,7 @@ chmod +x "$APP/update.sh"
 echo "$sha" > "$APP/.local-build"
 
 echo "Baue Image (dauert ein paar Minuten) ..."
-docker build --build-arg IMAGE_NAME="$image" -t "$image" "$SRC"
+docker build --build-arg IMAGE_NAME="$image" --build-arg GIT_SHA="$sha" -t "$image" "$SRC"
 
 cp "$SRC/deploy/docker-compose.yml" "$SRC/deploy/setup.sh" "$SRC"/deploy/*.conf "$APP/"
 chmod +x "$APP/setup.sh"

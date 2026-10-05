@@ -1,6 +1,7 @@
 import { api, setUnauthorizedHandler } from "./api.js";
 import { syncSubscription } from "./push.js";
 import { icon } from "./ui.js";
+import { LOADED_BUILD, hardReload, newerVersion } from "./version.js";
 import * as heute from "./views/heute.js";
 import * as woche from "./views/woche.js";
 import * as aufgaben from "./views/aufgaben.js";
@@ -133,6 +134,21 @@ async function render() {
   if (token !== renderToken && typeof cleanup === "function") cleanup();
 }
 
+function showUpdateBanner() {
+  if (document.getElementById("update-banner")) return;
+  const banner = document.createElement("div");
+  banner.id = "update-banner";
+  banner.className = "update-banner";
+  banner.setAttribute("role", "status");
+  banner.innerHTML = `<span>Neue Version verfügbar</span><button type="button" class="btn small primary">Aktualisieren</button>`;
+  banner.querySelector("button").addEventListener("click", () => hardReload());
+  document.body.appendChild(banner);
+}
+
+async function checkForUpdate() {
+  if (await newerVersion()) showUpdateBanner();
+}
+
 async function boot() {
   setUnauthorizedHandler(() => {
     if (!location.hash.startsWith("#/login")) navigate("#/login", { replace: true });
@@ -160,6 +176,7 @@ async function boot() {
   if (!me.authenticated) {
     navigate("#/login", { replace: true });
   } else {
+    if (me.build && LOADED_BUILD && me.build !== LOADED_BUILD) showUpdateBanner();
     if (location.hash.startsWith("#/login") || !location.hash) history.replaceState(null, "", "#/heute");
     await render();
     refreshBadge();
@@ -171,6 +188,7 @@ async function boot() {
     if (document.visibilityState === "visible" && Date.now() - lastRender > 60_000 && !location.hash.startsWith("#/login")) {
       render();
       refreshBadge();
+      checkForUpdate();
     }
   });
 }

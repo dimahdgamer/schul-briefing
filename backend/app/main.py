@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 import time
 from collections import defaultdict
@@ -67,6 +68,7 @@ def _build_id() -> str:
 # Relative Imports in den JS-Modulen erben das Präfix automatisch.
 BUILD_ID = _build_id()
 ASSET_PREFIX = f"/a/{BUILD_ID}"
+APP_COMMIT = os.environ.get("APP_COMMIT", "")[:7]
 
 
 def _index_html() -> str:
@@ -134,7 +136,12 @@ async def logout(request: Request) -> dict[str, Any]:
 
 @app.get("/api/me")
 async def me(request: Request) -> dict[str, Any]:
-    return {"authenticated": bool(request.session.get("auth")), "demo": cfg.demo}
+    return {
+        "authenticated": bool(request.session.get("auth")),
+        "demo": cfg.demo,
+        "build": BUILD_ID,
+        "commit": APP_COMMIT,
+    }
 
 
 # ── Daten ────────────────────────────────────────────────────────────

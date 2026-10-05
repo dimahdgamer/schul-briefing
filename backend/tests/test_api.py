@@ -43,7 +43,9 @@ def test_auth_required(client):
     assert http.get("/api/overview").status_code == 401
     assert http.post("/api/login", json={"password": "falsch"}).status_code == 401
     assert http.post("/api/login", json={"password": "geheim"}).status_code == 200
-    assert http.get("/api/me").json()["authenticated"] is True
+    me = http.get("/api/me").json()
+    assert me["authenticated"] is True
+    assert me["build"] and "commit" in me
 
 
 def test_endpoints_return_data(client):

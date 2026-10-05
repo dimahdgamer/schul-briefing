@@ -18,6 +18,8 @@ COPY frontend frontend
 COPY deploy deploy
 COPY .env.example deploy/.env.example
 ARG IMAGE_NAME=""
+ARG GIT_SHA=""
+ENV APP_COMMIT=${GIT_SHA}
 RUN chmod +x deploy/*.sh \
  && if [ -n "$IMAGE_NAME" ]; then sed -i "s#^IMAGE=.*#IMAGE=${IMAGE_NAME}#" deploy/.env.example; fi
 

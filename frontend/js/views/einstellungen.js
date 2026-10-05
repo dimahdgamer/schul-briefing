@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { currentSubscription, disablePush, enablePush, isIos, isStandalone, pushSupported } from "../push.js";
 import { errorState, esc, icon, longDate, skeleton, timeAgo, toast } from "../ui.js";
+import { LOADED_BUILD, hardReload } from "../version.js";
 
 export const title = "Einstellungen";
 
@@ -124,6 +125,22 @@ function briefingSection(s, status, bell) {
     </div>`;
 }
 
+function appSection(me) {
+  const outdated = me.build && LOADED_BUILD && me.build !== LOADED_BUILD;
+  const version = me.commit ? `Version <span class="mono">${esc(me.commit)}</span>` : "Version";
+  return `
+    <div class="card">
+      <div class="field">
+        <div>
+          <div class="field-label">${version} ${outdated ? '<span class="tag yellow">Update verfügbar</span>' : '<span class="tag green">aktuell</span>'}</div>
+          <div class="field-help">Auf dem Server: <span class="mono">${esc(me.build || "–")}</span> · Auf diesem Gerät: <span class="mono">${esc(LOADED_BUILD || "–")}</span></div>
+        </div>
+        <button class="btn small ${outdated ? "primary" : ""}" data-action="hard-reload">${icon("arrows-clockwise", "sm")}App aktualisieren</button>
+      </div>
+      <div class="field"><div class="field-help">„App aktualisieren“ leert den Zwischenspeicher dieses Geräts und lädt die App neu. Deine Einstellungen und die Anmeldung bleiben erhalten.</div></div>
+    </div>`;
+}
+
 function statusSection(status) {
   const account = status.account || {};
   const moduleErrors = Object.entries(status.module_errors || {});
@@ -146,15 +163,16 @@ function statusSection(status) {
 
 export async function render(main, params, ctx) {
   main.innerHTML = skeleton(6);
-  let settings, status, ical, subscription, devices, bell;
+  let settings, status, ical, subscription, devices, bell, me;
   try {
-    [settings, status, ical, subscription, devices, bell] = await Promise.all([
+    [settings, status, ical, subscription, devices, bell, me] = await Promise.all([
       api("/settings"),
       api("/status"),
       api("/ical"),
       currentSubscription().catch(() => null),
       api("/push/devices").then((d) => d.devices.length),
       api("/bell"),
+      api("/me"),
     ]);
   } catch (error) {
     if (!ctx.isCurrent()) return;
@@ -255,6 +273,11 @@ export async function render(main, params, ctx) {
     <section class="section reveal" style="--i:8">
       <h2 class="section-title">Status</h2>
       ${statusSection(status)}
+    </section>
+
+    <section class="section reveal" style="--i:9">
+      <h2 class="section-title">App</h2>
+      ${appSection(me)}
     </section>
 
     <div class="btn-row reveal" style="margin-top:32px;justify-content:center">
@@ -412,6 +435,10 @@ export async function render(main, params, ctx) {
       toast(error.message, "error");
       button.disabled = false;
     }
+  });
+  on("hard-reload", async (event) => {
+    event.currentTarget.disabled = true;
+    await hardReload();
   });
   on("logout", async () => {
     await api("/logout", { method: "POST" }).catch(() => {});
