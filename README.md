@@ -212,7 +212,7 @@ sudo nginx -t && sudo systemctl reload nginx
 **5.3 Tunnel prüfen, DNS-Eintrag anlegen, neu starten:**
 
 ```bash
-cloudflared tunnel ingress validate --config /etc/cloudflared/config.yml
+cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
 cloudflared tunnel route dns b90155e8-758d-46a6-a77e-1f030b0fce38 schule.gayjetlag.de
 sudo systemctl restart cloudflared
 ```
