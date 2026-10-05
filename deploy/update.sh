@@ -17,6 +17,19 @@ main() {
     exit 1
   fi
 
+  # Nach build-local.sh läuft eine lokal gebaute Version. Erst weitermachen, wenn
+  # GitHub denselben Stand gebaut hat, sonst käme die ältere Version zurück.
+  if [ -f .local-build ]; then
+    local sha
+    sha="$(cat .local-build)"
+    if docker manifest inspect "${image%:*}:$sha" > /dev/null 2>&1; then
+      rm -f .local-build
+      echo "$(date '+%F %T') GitHub hat ${sha:0:7} gebaut, automatische Updates laufen wieder"
+    else
+      exit 0
+    fi
+  fi
+
   old="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)"
   if ! docker pull -q "$image" > /dev/null 2>&1; then
     echo "$(date '+%F %T') Image konnte nicht geladen werden (Netz oder Login bei ghcr.io?)"

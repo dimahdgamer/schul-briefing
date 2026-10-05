@@ -249,6 +249,48 @@ App fehlt noch. Läuft sie, steht dort `{"ok":true,…}`. Danach
 - `.env` und `data/` werden bei Updates nie angefasst. `docker-compose.yml` und die
   Skripte dagegen schon, eigene Änderungen gehören deshalb in `.env`.
 
+### Notlösung: direkt auf dem Pi bauen
+
+Wenn GitHub Actions nicht baut (z. B. „The job was not acquired by Runner“), kann der
+Pi das Image selbst bauen.
+
+**Einmalig einrichten:**
+
+1. Auf dem Pi einen Schlüssel erzeugen, der nur dieses Repo lesen darf:
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C "pi schul-briefing" -f ~/.ssh/schul-briefing
+   cat ~/.ssh/schul-briefing.pub
+   ```
+2. Die ausgegebene Zeile (beginnt mit `ssh-ed25519`) kopieren. Auf GitHub im Repo
+   *Settings → Deploy keys → Add deploy key* öffnen, als Titel `Pi` eintragen, die
+   Zeile einfügen und **„Allow write access“ nicht anhaken**. Mit *Add key* speichern.
+3. Auf dem Pi festlegen, dass GitHub diesen Schlüssel bekommt, und den Code holen:
+   ```bash
+   cat >> ~/.ssh/config <<'CONF'
+   Host github-schul
+     HostName github.com
+     User git
+     IdentityFile ~/.ssh/schul-briefing
+     IdentitiesOnly yes
+   CONF
+   git clone github-schul:dimahdgamer/schul-briefing.git ~/schul-briefing-src
+   ```
+   Bei der Frage `Are you sure you want to continue connecting` mit `yes` bestätigen.
+
+**Bauen und starten** (geht jederzeit wieder, holt immer den neuesten Code):
+
+```bash
+~/schul-briefing-src/deploy/build-local.sh
+```
+
+Danach pausiert das automatische Update, bis GitHub denselben Stand gebaut hat. Dann
+läuft es von selbst weiter, und in `update.log` steht ein Hinweis. Wenn du stattdessen
+sofort wieder zur Version von GitHub wechseln willst:
+
+```bash
+rm ~/schul-briefing/.local-build && ~/schul-briefing/update.sh
+```
+
 ## Wie oft wird abgefragt?
 
 An Schultagen standardmäßig alle 15 Minuten zwischen 06:00 und 21:30 Uhr, am
