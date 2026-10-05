@@ -114,16 +114,19 @@ Der Pi braucht ein Token, um das private Image herunterzuladen. Es darf nur lese
 
 ### Schritt 4: Pi einrichten (per SSH auf dem Pi)
 
-**4.1 Prüfen, ob alles passt**
+**4.1 Docker installieren (falls noch nicht vorhanden)**
 
 ```bash
-uname -m        # muss "aarch64" ausgeben (64-Bit-System)
-docker ps       # muss ohne sudo funktionieren
+uname -m                      # muss "aarch64" ausgeben (64-Bit-System)
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER # danach abmelden und neu per SSH anmelden
+docker run --rm hello-world   # muss "Hello from Docker!" zeigen
+docker compose version
 ```
 
 Gibt `uname -m` den Wert `armv7l` aus, läuft auf dem Pi ein 32-Bit-System. Dann
-muss im Workflow eine Zeile ergänzt werden, sag Bescheid. Braucht `docker ps` ein
-sudo: `sudo usermod -aG docker $USER`, abmelden, neu anmelden.
+muss im Workflow eine Zeile ergänzt werden.
 
 **4.2 Bei GitHub anmelden.** Bei der Passwortabfrage das
 Token aus Schritt 3 einfügen (es wird beim Einfügen nicht angezeigt):
@@ -142,7 +145,7 @@ ls -a
 ```
 
 Danach liegen dort `docker-compose.yml`, `setup.sh`, `update.sh`, `.env.example` und
-`schule.gayjetlag.de.conf`.
+`schule.gayjetlag.de.conf` (die nginx-Seite für Schritt 5).
 
 **4.4 Einrichtung starten:**
 
@@ -175,91 +178,54 @@ Speichern mit `Strg+O`, `Enter`, `Strg+X`. Dann noch einmal:
 Am Ende muss `Die App läuft lokal auf http://127.0.0.1:8470` stehen. Das Skript hat
 außerdem einen cron-Eintrag angelegt, der alle 5 Minuten `update.sh` ausführt.
 
-### Schritt 5: Subdomain über Cloudflare freigeben
+### Schritt 5: Subdomain über Cloudflare Tunnel und nginx freigeben
 
-**5.1 Herausfinden, wie Cloudflare bei dir läuft:**
+Weg einer Anfrage: Cloudflare (HTTPS) → `cloudflared` → nginx auf Port 80 → App auf
+`127.0.0.1:8470`. Das ist derselbe Weg wie bei den anderen Subdomains. HTTPS macht
+Cloudflare, deshalb braucht es weder certbot noch Zertifikate.
 
-```bash
-docker ps --format '{{.Names}}  {{.Image}}' | grep -i cloudflare
-systemctl list-units --type=service | grep -i cloudflare
-ls /etc/cloudflared ~/.cloudflared 2>/dev/null
-```
-
-- Taucht **`cloudflared`** auf (Image `cloudflare/cloudflared` oder Dienst
-  `cloudflared.service`), nutzt du einen **Cloudflare Tunnel**: weiter mit **Weg A**.
-- Taucht etwas mit **`ddns`** auf (z. B. `cloudflare-ddns`), meldet ein Programm deine
-  IP an Cloudflare und nginx macht HTTPS: weiter mit **Weg B**.
-
-Unsicher? Schick die Ausgabe der drei Befehle (ohne Tokens), dann sage ich dir genau,
-was zu tun ist.
-
-#### Weg A: Cloudflare Tunnel
-
-**A1.** Die Tunnel-Konfiguration öffnen. Meistens ist es eine der beiden:
+**5.1 Tunnel-Eintrag.** Erst eine Sicherung anlegen, dann die Datei öffnen:
 
 ```bash
+sudo cp /etc/cloudflared/config.yml /etc/cloudflared/config.yml.$(date +%F)
 sudo nano /etc/cloudflared/config.yml
-nano ~/.cloudflared/config.yml
 ```
 
-**A2.** Unter `ingress:` einen Eintrag ergänzen. Er muss **vor** der letzten Zeile
-`- service: http_status:404` stehen, und die Einrückung muss genauso sein wie bei
-den anderen Einträgen:
+Unter `ingress:` **direkt über** der letzten Zeile `- service: http_status:404`
+einfügen, mit derselben Einrückung wie die anderen Einträge (Leerzeichen, keine Tabs):
 
 ```yaml
   - hostname: schule.gayjetlag.de
-    service: http://localhost:8470
+    service: http://localhost:80
 ```
 
-**A3.** Den DNS-Eintrag anlegen. `TUNNELNAME` ist der Wert hinter `tunnel:` oben
-in derselben Datei:
+**5.2 nginx-Seite anlegen:**
 
 ```bash
-cloudflared tunnel route dns TUNNELNAME schule.gayjetlag.de
-```
-
-**A4.** Den Tunnel neu starten:
-
-```bash
-sudo systemctl restart cloudflared
-```
-
-Läuft cloudflared als Docker-Container, stattdessen `docker restart <name>`.
-
-**Sonderfälle:**
-- **cloudflared läuft in Docker:** Mit
-  `docker inspect <name> --format '{{.HostConfig.NetworkMode}}'` prüfen. Steht dort
-  nicht `host`, funktioniert `localhost:8470` aus dem Container heraus nicht. Sag
-  dann Bescheid.
-- **Es gibt keine `config.yml`, sondern ein Token im Startbefehl:** Dann wird der
-  Tunnel im Cloudflare-Dashboard verwaltet. Dort unter *Zero Trust → Networks →
-  Tunnels →* dein Tunnel *→ Public Hostname → Add* eintragen: Subdomain `schule`,
-  Domain `gayjetlag.de`, Service `HTTP` und `localhost:8470`. Den DNS-Eintrag legt
-  Cloudflare dann selbst an.
-
-#### Weg B: DDNS und nginx
-
-**B1.** In der DDNS-Konfiguration die Subdomain `schule` genauso ergänzen wie deine
-anderen Subdomains und den DDNS-Container bzw. -Dienst neu starten.
-
-**B2.** Die nginx-Seite aktivieren:
-
-```bash
-sudo cp ~/schul-briefing/schule.gayjetlag.de.conf /etc/nginx/sites-available/
-sudo ln -s /etc/nginx/sites-available/schule.gayjetlag.de.conf /etc/nginx/sites-enabled/
+sudo cp ~/schul-briefing/schule.gayjetlag.de.conf /etc/nginx/sites-available/schule
+sudo ln -s /etc/nginx/sites-available/schule /etc/nginx/sites-enabled/schule
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-**B3.** HTTPS so einrichten wie bei deinen anderen Subdomains, meist mit:
+`nginx -t` muss „syntax is ok“ und „test is successful“ melden.
+
+**5.3 Tunnel prüfen, DNS-Eintrag anlegen, neu starten:**
 
 ```bash
-sudo certbot --nginx -d schule.gayjetlag.de
+cloudflared tunnel ingress validate --config /etc/cloudflared/config.yml
+cloudflared tunnel route dns b90155e8-758d-46a6-a77e-1f030b0fce38 schule.gayjetlag.de
+sudo systemctl restart cloudflared
 ```
+
+Der zweite Befehl legt bei Cloudflare den CNAME-Eintrag an. Er braucht kein `sudo`,
+weil die Anmeldung (`cert.pem`) in `~/.cloudflared` liegt.
 
 #### Test
 
-Im Browser <https://schule.gayjetlag.de/healthz> öffnen. Dort muss `{"ok":true,…}`
-stehen. Danach <https://schule.gayjetlag.de> öffnen und mit dem `APP_PASSWORD` anmelden.
+Im Browser <https://schule.gayjetlag.de/healthz> öffnen. Läuft der Container noch
+nicht, kommt **502 Bad Gateway**. Das heißt, Tunnel und nginx funktionieren, nur die
+App fehlt noch. Läuft sie, steht dort `{"ok":true,…}`. Danach
+<https://schule.gayjetlag.de> öffnen und mit dem `APP_PASSWORD` anmelden.
 
 ### Schritt 6: Handy einrichten
 
@@ -296,6 +262,7 @@ Module sind darin gebündelt. Nach einem fehlgeschlagenen Login pausiert die App
 |---|---|
 | Login schlägt fehl | Zugangsdaten in `.env` prüfen. Hat das Konto mehrere Profile, statt der E-Mail den Benutzernamen verwenden. 2FA wird nicht unterstützt. |
 | Ein Modul fehlt (z. B. Noten) | *Einstellungen → Status* zeigt, welches Modul nicht verfügbar ist. Die Rohantwort steht unter `/api/debug/raw/grades` (nach Anmeldung). |
+| 502 Bad Gateway | Container läuft nicht: `cd ~/schul-briefing && docker compose ps` und `docker compose logs --tail 50`. |
 | Keine Push-Nachrichten | Testnachricht senden. Auf dem iPhone muss die App vom Home-Bildschirm gestartet sein. Bei Android den Akku-Sparmodus für Chrome prüfen. |
 | Ferien falsch | `HOLIDAY_SUBDIVISION` in `.env` prüfen (NRW = `DE-NW`). |
 
