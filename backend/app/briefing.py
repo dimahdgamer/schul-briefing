@@ -81,7 +81,7 @@ def build_push(
 ) -> dict[str, str]:
     """Kurztext für die Push-Benachrichtigung (Titel + max. ~6 Zeilen)."""
     day = fmt.parse(summary["date"])
-    prefix = "Heute" if kind == "morning" else fmt.relative_day(day, today)
+    prefix = fmt.relative_day(day, today)
     lines: list[str] = []
 
     if not summary["lessons"]:

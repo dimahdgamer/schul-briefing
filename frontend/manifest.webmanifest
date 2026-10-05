@@ -17,6 +17,6 @@
   "shortcuts": [
     { "name": "Woche", "url": "/#/woche" },
     { "name": "Aufgaben", "url": "/#/aufgaben" },
-    { "name": "Noten", "url": "/#/noten" }
+    { "name": "Post", "url": "/#/post" }
   ]
 }

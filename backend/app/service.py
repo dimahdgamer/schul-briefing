@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from . import briefing, fmt
+from . import bell, briefing, fmt
 from .config import Config
 from .db import Database
 from .holidays import SchoolCalendar
@@ -130,20 +130,53 @@ class AppService:
 
     # ── Briefing ─────────────────────────────────────────────────────
 
-    def briefing_target(self, kind: str) -> date:
-        today = self.today()
-        return today if kind == "morning" else self.calendar.next_school_day(today)
+    def briefing_time_for(self, day: date) -> dict[str, Any]:
+        """Uhrzeit des Morgen-Briefings an einem Tag.
 
-    def briefing(self, kind: str) -> dict[str, Any]:
+        Im Modus "auto" zählt die früheste Stunde, die an dem Tag im Plan steht,
+        auch wenn sie ausfällt: Gerade dann soll das Briefing rechtzeitig kommen."""
+        settings = self.db.settings()
+        fixed = {"time": settings["briefing_time"], "first_hour": None, "mode": "fixed"}
+        if settings["briefing_mode"] != "auto":
+            return fixed
+        iso = day.isoformat()
+        hours = [bell.first_number(l["hour"]) for l in self.snap("lessons") if l["date"] == iso]
+        hours = sorted({int(h) for h in hours if h})
+        if not hours:
+            return {**fixed, "mode": "auto-fallback"}
+        first = str(hours[0])
+        by_hour = settings["briefing_by_hour"]
+        at = by_hour.get(first) or by_hour[max(by_hour, key=int)]
+        return {"time": at, "first_hour": first, "mode": "auto"}
+
+    def briefing_target(self, kind: str) -> date:
+        """Morgens: der Tag des nächsten Briefings. Abends: der nächste Schultag."""
+        if kind == "morning":
+            return date.fromisoformat(self.next_briefing()["date"])
+        return self.calendar.next_school_day(self.today())
+
+    def briefing(self, kind: str, target: date | None = None) -> dict[str, Any]:
         today = self.today()
-        target = self.briefing_target(kind)
+        target = target or self.briefing_target(kind)
         summary = self.day(target)
         letters, messages = self.unread_counts()
         push = briefing.build_push(kind, summary, today, letters, messages)
-        return {"kind": kind, "target": target.isoformat(), "push": push, "summary": summary}
+        return {"kind": kind, "target": target.isoformat(), "push": push, "summary": summary,
+                "scheduled": self.briefing_time_for(target) if kind == "morning" else None}
 
-    async def send_briefing(self, kind: str) -> dict[str, Any]:
-        result = self.briefing(kind)
+    def next_briefing(self) -> dict[str, Any]:
+        """Wann das nächste Morgen-Briefing kommt (für die Anzeige in den Einstellungen)."""
+        now = self.now()
+        today = now.date()
+        day = today if self.calendar.is_school_day(today) else self.calendar.next_school_day(today)
+        if day == today:
+            planned = self.briefing_time_for(today)
+            if self.db.get("sent_briefing") == today.isoformat() or now.strftime("%H:%M") > planned["time"]:
+                day = self.calendar.next_school_day(today)
+        return {"date": day.isoformat(), **self.briefing_time_for(day)}
+
+    async def send_briefing(self, kind: str, target: date | None = None) -> dict[str, Any]:
+        result = self.briefing(kind, target)
         push = result["push"]
         self.db.add_event("briefing", kind, push["title"], push["body"], push["url"], result["target"])
         delivered = await self.pusher.send(push["title"], push["body"], push["url"], tag=f"briefing-{kind}")
@@ -182,10 +215,6 @@ class AppService:
     def disabled_modules(self) -> list[str]:
         return list(self.db.get("disabled_modules", []) or [])
 
-    def features(self) -> dict[str, bool]:
-        disabled = set(self.disabled_modules())
-        return {"grades": "grades" not in disabled}
-
     def status(self) -> dict[str, Any]:
         status = self.db.get("status", {}) or {}
         return {
@@ -198,4 +227,5 @@ class AppService:
             "running": self.sync.running,
             "demo": self.cfg.demo,
             "devices": len(self.pusher.devices()),
+            "next_briefing": self.next_briefing(),
         }

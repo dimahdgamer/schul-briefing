@@ -14,7 +14,7 @@ from . import fmt
 
 @dataclass
 class Change:
-    category: str  # lessons | homework | exams | grades | letters | messages | calendar
+    category: str  # lessons | homework | exams | letters | messages | calendar
     kind: str
     title: str
     body: str
@@ -42,6 +42,9 @@ def _lesson_line(lesson: dict[str, Any], previous: dict[str, Any] | None) -> tup
         return "cancelled", f"{hour}: {lesson['subject']} fällt aus"
     if was == "cancelled" and state != "cancelled":
         return "restored", f"{hour}: {lesson['subject']} findet doch statt"
+    if was in ("substitution", "room-change", "extra") and state == "regular":
+        room = f" in {_room(lesson['room'])}" if lesson.get("room") else ""
+        return "normal", f"{hour}: {lesson['subject']} wieder wie geplant{room}"
     if state == "substitution":
         if previous and was == "substitution" and all(previous[f] == lesson[f] for f in LESSON_FIELDS):
             return None
@@ -116,6 +119,7 @@ def diff_lessons(
                 "substitution": f"{label}: Vertretung in {lesson.get('original_subject') or lesson['subject']}",
                 "extra": f"{label}: Zusätzliche Stunde",
                 "room": f"{label}: Raumänderung {lesson['subject']}",
+                "normal": f"{label}: {lesson['subject']} wieder wie geplant",
             }[kind]
         else:
             title = f"{label}: {fmt.plural(len(entries), 'Änderung', 'Änderungen')} im Stundenplan"
@@ -215,39 +219,6 @@ def diff_exams(prev: list[dict[str, Any]] | None, curr: list[dict[str, Any]], to
 
 def _comment(exam: dict[str, Any]) -> str:
     return f"\n{exam['comment']}" if exam.get("comment") else ""
-
-
-# ── Noten ────────────────────────────────────────────────────────────
-
-
-def diff_grades(prev: list[dict[str, Any]] | None, curr: list[dict[str, Any]], show_values: bool) -> list[Change]:
-    if prev is None:
-        return []
-    known = {g["id"] for subject in prev for g in subject["grades"]}
-    changes = []
-    for subject in curr:
-        fresh = [g for g in subject["grades"] if g["id"] not in known]
-        if not fresh:
-            continue
-        if show_values:
-            values = ", ".join(g["value"] for g in fresh)
-            body = f"{values}" + (f" · {fresh[0]['type']}" if fresh[0].get("type") else "")
-            if subject.get("average") is not None:
-                body += f"\nSchnitt jetzt {format(subject['average'], '.2f').replace('.', ',')}"
-        else:
-            body = "Tippe zum Ansehen."
-        changes.append(
-            Change(
-                "grades",
-                "new",
-                f"Neue Note in {subject['subject']}" if len(fresh) == 1 else f"{len(fresh)} neue Noten in {subject['subject']}",
-                body,
-                fresh[-1].get("date") or None,
-                "/#/noten",
-                {"subject": subject["subject"], "ids": [g["id"] for g in fresh]},
-            )
-        )
-    return changes
 
 
 # ── Post ─────────────────────────────────────────────────────────────

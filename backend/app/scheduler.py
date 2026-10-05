@@ -72,12 +72,13 @@ class Scheduler:
         school_day = cal.is_school_day(today)
 
         # Morgen-Briefing (nur an Schultagen)
+        briefing_at = self.app.briefing_time_for(today)["time"]
         if settings["briefing_enabled"] and school_day and self._due(
-            now_min, settings["briefing_time"], db.get("sent_briefing"), today_iso
+            now_min, briefing_at, db.get("sent_briefing"), today_iso
         ):
             db.set("sent_briefing", today_iso)
             await self._poll("briefing")
-            await self.app.send_briefing("morning")
+            await self.app.send_briefing("morning", today)
             return
 
         # Abend-Vorschau (wenn morgen Schule ist)

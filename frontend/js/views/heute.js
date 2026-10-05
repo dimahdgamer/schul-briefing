@@ -35,6 +35,7 @@ function lessonRow(lesson, index) {
     meta.push(`<span class="was">statt ${esc(lesson.original_subject)}</span>`);
   }
   if (lesson.teacher) meta.push(`<span>${esc(lesson.teacher)}</span>`);
+  if (lesson.course && lesson.course !== lesson.subject) meta.push(`<span class="mono">${esc(lesson.course)}</span>`);
   if (lesson.room) {
     const was = lesson.state === "room-change" && lesson.original_room ? ` <span class="was">statt ${esc(lesson.original_room)}</span>` : "";
     meta.push(`<span class="mono">${esc(lesson.room)}</span>${was}`);

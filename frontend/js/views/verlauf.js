@@ -7,7 +7,6 @@ const CATEGORY = {
   lessons: ["calendar-x", "yellow", "Stundenplan"],
   homework: ["notebook", "", "Hausaufgaben"],
   exams: ["exam", "red", "Klassenarbeit"],
-  grades: ["chart-line-up", "green", "Noten"],
   letters: ["envelope-simple", "blue", "Elternbrief"],
   messages: ["chat-circle-text", "blue", "Nachricht"],
   calendar: ["calendar-dots", "green", "Termin"],

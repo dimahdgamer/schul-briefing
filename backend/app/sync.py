@@ -19,18 +19,20 @@ from .schulmanager import LoginError, RpcCall, SchulmanagerClient, SchulmanagerE
 
 log = logging.getLogger(__name__)
 
-MODULES = ("lessons", "homework", "exams", "grades", "letters", "threads", "calendar")
+MODULES = ("lessons", "homework", "exams", "letters", "threads", "calendar")
 NOTIFY_SETTING = {
     "lessons": "notify_lessons",
     "homework": "notify_homework",
     "exams": "notify_exams",
-    "grades": "notify_grades",
     "letters": "notify_letters",
     "messages": "notify_messages",
     "calendar": "notify_calendar",
 }
 MAX_SINGLE_PUSHES = 4
 DISABLED_STATUS = {403, 404}  # "Modul nicht gebucht / für diese Rolle nicht freigegeben"
+# Erhöhen, wenn sich die IDs normalisierter Einträge ändern. Der erste Abruf danach
+# legt nur einen neuen Ausgangsstand an, statt alles als Änderung zu melden.
+SNAPSHOT_VERSION = 2
 LOGIN_BACKOFF_SECONDS = 6 * 3600
 
 
@@ -64,8 +66,9 @@ class SyncService:
         return self._lock.locked()
 
     def lesson_window(self, today: date) -> tuple[date, date]:
+        """Letzte Woche (für Hausaufgaben-Fälligkeit) bis vier Wochen voraus."""
         monday = today - timedelta(days=today.weekday())
-        return monday, monday + timedelta(days=13)
+        return monday - timedelta(days=7), monday + timedelta(days=27)
 
     def account(self) -> dict[str, Any]:
         if self.demo:
@@ -107,7 +110,6 @@ class SyncService:
             "exams": RpcCall("exams", "get-exams", {"student": {"id": sid},
                                                      "start": (today - timedelta(days=7)).isoformat(),
                                                      "end": (today + timedelta(days=120)).isoformat()}),
-            "grades": RpcCall("grades", "get-grading-information-for-student", {"studentId": str(sid)}),
             "letters": RpcCall("letters", "get-letters", {}),
             "threads": RpcCall("messenger", "get-subscriptions", {"all": True, "includeArchived": False}),
             "calendar": RpcCall("calendar", "get-events-for-user", {"start": (today - timedelta(days=7)).isoformat(),
@@ -187,6 +189,7 @@ class SyncService:
         disabled: list[str] = []
         changes: list[diff.Change] = []
 
+        fresh_start = self.db.get("snapshot_version") != SNAPSHOT_VERSION
         normalized: dict[str, Any] = {}
         for module in MODULES:
             ok, data, status = raw.get(module, (False, None, 0))
@@ -199,7 +202,7 @@ class SyncService:
                 module_errors[module] = f"nicht verfügbar (Status {status})"
                 continue
             try:
-                normalized[module] = self._normalize(module, data, student_id)
+                normalized[module] = self._normalize(module, data, student_id, normalized)
             except Exception as exc:  # Format geändert: Modul überspringen, Rest weiter
                 log.exception("Normalisierung von %s fehlgeschlagen", module)
                 module_errors[module] = f"Format unbekannt: {exc}"
@@ -208,7 +211,7 @@ class SyncService:
             self.calendar.set_calendar_holidays(normalized["calendar"])
 
         for module, items in normalized.items():
-            previous = self.db.snapshot(module)
+            previous = None if fresh_start else self.db.snapshot(module)
             changes.extend(self._diff(module, previous, items, today))
             self.db.save_snapshot(module, items)
         self._lesson_cache.clear()
@@ -217,20 +220,23 @@ class SyncService:
         self.db.sync_finished(sync_id, True, changes=len(changes),
                               error="; ".join(f"{k}: {v}" for k, v in module_errors.items()) or None)
         self.db.set("disabled_modules", disabled)
+        self.db.set("snapshot_version", SNAPSHOT_VERSION)
         self._set_status(error=None, module_errors=module_errors)
         self.db.prune_events()
         log.info("Sync fertig (%s): %d Änderungen", trigger, len(changes))
         return {"ok": True, "changes": len(changes), "module_errors": module_errors}
 
-    def _normalize(self, module: str, data: Any, student_id: Any) -> Any:
+    def _normalize(self, module: str, data: Any, student_id: Any, done: dict[str, Any]) -> Any:
         if module == "lessons":
             return normalize.lessons(data)
         if module == "homework":
-            return normalize.homework(data, lambda d: self.calendar.next_school_day(d))
+            # Fälligkeit = nächste Stunde im Fach, dafür den Stundenplan dieses Abrufs nutzen
+            lesson_list = done.get("lessons")
+            if lesson_list is None:
+                lesson_list = self.db.snapshot("lessons") or []
+            return normalize.homework(data, lesson_list, self.calendar.next_school_day)
         if module == "exams":
             return normalize.exams(data)
-        if module == "grades":
-            return normalize.grades(data)
         if module == "letters":
             return normalize.letters(data, student_id)
         if module == "threads":
@@ -246,8 +252,6 @@ class SyncService:
             return diff.diff_homework(previous, items, today)
         if module == "exams":
             return diff.diff_exams(previous, items, today)
-        if module == "grades":
-            return diff.diff_grades(previous, items, show_values=True)
         if module == "letters":
             return diff.diff_letters(previous, items)
         if module == "threads":
@@ -280,10 +284,7 @@ class SyncService:
             await self.pusher.send(title, body, "/#/verlauf", tag="sammel")
         else:
             for _, change in to_push:
-                body = change.body
-                if change.category == "grades" and not settings.get("grade_values_in_push"):
-                    body = "Tippe zum Ansehen."
-                await self.pusher.send(change.title, body, change.url or "/", tag=f"{change.category}-{change.ref_date or ''}")
+                await self.pusher.send(change.title, change.body, change.url or "/", tag=f"{change.category}-{change.ref_date or ''}")
         for event_id, _ in to_push:
             self.db.mark_pushed(event_id)
 

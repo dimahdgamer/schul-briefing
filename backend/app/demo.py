@@ -13,12 +13,6 @@ from typing import Any, Callable
 
 from .db import Database
 
-HOURS = {
-    "1": ("08:00", "08:45"), "2": ("08:50", "09:35"), "3": ("09:55", "10:40"),
-    "4": ("10:45", "11:30"), "5": ("11:50", "12:35"), "6": ("12:40", "13:25"),
-    "7": ("13:45", "14:30"), "8": ("14:30", "15:15"),
-}
-
 # Fach, Kürzel, Lehrkraft, Raum
 SUBJECTS = {
     "M": ("Mathematik", "M", "Kowalski", "A204"),
@@ -91,7 +85,7 @@ class DemoSource:
         if state:
             return state
         rng = random.Random(today.toordinal())
-        state = {"tick": 0, "overrides": {}, "homework": [], "exams": [], "grades": [], "letters": [], "threads": [], "next_id": 1000}
+        state = {"tick": 0, "overrides": {}, "homework": [], "exams": [], "letters": [], "threads": [], "next_id": 1000}
         # Ein paar Änderungen für heute und morgen
         for offset in (0, 1, 3):
             d = today + timedelta(days=offset)
@@ -106,10 +100,6 @@ class DemoSource:
         # Klassenarbeiten
         for offset, code, kind in ((3, "M", "Klassenarbeit"), (9, "E", "Test"), (16, "D", "Klassenarbeit"), (24, "BI", "Test")):
             self._add_exam(state, today + timedelta(days=offset), code, kind)
-        # Noten
-        for code in ("M", "D", "E", "BI", "PH", "GE", "F", "IF"):
-            for back in sorted(rng.sample(range(5, 60), k=rng.randint(2, 4)), reverse=True):
-                self._add_grade(state, code, today - timedelta(days=back), rng)
         # Post
         for i, (title, sender) in enumerate(LETTERS[:3]):
             self._add_letter(state, title, sender, today - timedelta(days=i * 4 + 1), read=i > 0)
@@ -156,14 +146,8 @@ class DemoSource:
             "id": self._next_id(state), "date": d.isoformat(),
             "subject": {"name": SUBJECTS[code][0], "abbreviation": code},
             "type": {"name": kind}, "comment": "",
-            "classHour": {"number": hour, "from": HOURS[hour][0] + ":00", "until": HOURS[hour][1] + ":00"},
+            "classHour": {"number": hour},
         })
-
-    def _add_grade(self, state: dict[str, Any], code: str, d: date, rng: random.Random) -> None:
-        value = rng.choice(["1", "2+", "2", "2-", "3+", "3", "3-", "4", "2", "1-"])
-        state["grades"].append({"id": self._next_id(state), "code": code, "value": f"0~{value}",
-                                "date": d.isoformat(), "weight": rng.choice([1, 1, 2]),
-                                "type": rng.choice(["Test", "Mündlich", "Klassenarbeit", "Hausaufgabe"])})
 
     def _add_letter(self, state: dict[str, Any], title: str, sender: str, d: date, read: bool) -> None:
         letter_id = self._next_id(state)
@@ -178,7 +162,7 @@ class DemoSource:
         state["tick"] += 1
         if rng.random() > 0.6:
             return
-        action = rng.choice(["override", "override", "restore", "homework", "grade", "letter", "message", "exam"])
+        action = rng.choice(["override", "override", "restore", "homework", "letter", "message", "exam"])
         upcoming = [today + timedelta(days=i) for i in range(0, 8) if (today + timedelta(days=i)).weekday() < 5]
         if action == "override" and upcoming:
             self._random_override(state, rng.choice(upcoming[:3]), rng)
@@ -187,8 +171,6 @@ class DemoSource:
         elif action == "homework":
             day = today if today.weekday() < 5 else today - timedelta(days=today.weekday() - 4)
             self._add_homework(state, day, rng.choice(WEEK[day.weekday()]), rng)
-        elif action == "grade":
-            self._add_grade(state, rng.choice(["M", "D", "E", "BI", "PH"]), today, rng)
         elif action == "letter":
             title, sender = rng.choice(LETTERS)
             self._add_letter(state, title, sender, today, read=False)
@@ -213,7 +195,6 @@ class DemoSource:
             "lessons": self.lessons(state, lesson_start, lesson_end),
             "homework": state["homework"],
             "exams": state["exams"],
-            "grades": self._grades(state),
             "letters": state["letters"],
             "threads": state["threads"],
             "calendar": self._calendar(today),
@@ -229,43 +210,32 @@ class DemoSource:
                 for index, code in enumerate(plan, start=1):
                     hour = str(index)
                     name, abbr, teacher, room = SUBJECTS[code]
-                    regular = {"subject": {"name": name, "abbreviation": abbr}, "subjectLabel": name,
+                    regular = {"subject": {"name": name, "abbreviation": abbr}, "subjectLabel": f"{abbr} G1",
                                "teachers": [{"lastname": teacher, "abbreviation": teacher[:3].upper()}],
                                "room": {"name": room}}
                     item: dict[str, Any] = {
                         "date": d.isoformat(),
-                        "classHour": {"number": hour, "from": HOURS[hour][0] + ":00", "until": HOURS[hour][1] + ":00"},
+                        "type": "regularLesson",
+                        "classHour": {"number": hour},
                         "actualLesson": regular,
                     }
                     override = state["overrides"].get(f"{d.isoformat()}#{hour}")
                     if override:
                         item["originalLessons"] = [regular]
+                        item["type"] = "changedLesson"
+                        item["isSubstitution"] = override["type"] != "cancelled"
                         if override["type"] == "cancelled":
                             item["actualLesson"] = None
                             item["isCancelled"] = True
                         elif override["type"] == "substitution":
                             s_name, s_abbr, _t, s_room = SUBJECTS[override["subject"]]
-                            item["actualLesson"] = {"subject": {"name": s_name, "abbreviation": s_abbr}, "subjectLabel": s_name,
+                            item["actualLesson"] = {"subject": {"name": s_name, "abbreviation": s_abbr}, "subjectLabel": f"{s_abbr} G1",
                                                     "teachers": [{"lastname": override["teacher"]}], "room": {"name": s_room}}
-                            item["isSubstitution"] = True
                         else:
                             item["actualLesson"] = dict(regular, room={"name": override["room"]})
                     out.append(item)
             d += timedelta(days=1)
         return out
-
-    def _grades(self, state: dict[str, Any]) -> dict[str, Any]:
-        codes = sorted({g["code"] for g in state["grades"]})
-        subjects = [{"id": i, "name": SUBJECTS[c][0], "abbreviation": c} for i, c in enumerate(codes, start=1)]
-        by_code = {c: i for i, c in enumerate(codes, start=1)}
-        courses = []
-        for code in codes:
-            courses.append({
-                "id": 100 + by_code[code], "subjectId": by_code[code], "gradingPreset": {"gradingSystem": 0},
-                "grades": [{"id": g["id"], "value": g["value"], "date": g["date"], "weight": g["weight"],
-                            "gradeType": {"name": g["type"]}} for g in state["grades"] if g["code"] == code],
-            })
-        return {"subjects": subjects, "courses": courses, "finalGrades": []}
 
     def _calendar(self, today: date) -> dict[str, Any]:
         d = today + timedelta(days=(3 - today.weekday()) % 7 + 7)

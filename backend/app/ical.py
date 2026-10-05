@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +28,11 @@ def _fold(line: str) -> str:
         current += encoded
     parts.append(current.decode("utf-8"))
     return "\r\n ".join(parts)
+
+
+def _uid(kind: str, key: str) -> str:
+    """UIDs nur aus Buchstaben und Ziffern, manche Kalender-Apps scheitern sonst."""
+    return f"{kind}-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:20]}@schulbriefing"
 
 
 def _utc(day: str, hhmm: str, tz: ZoneInfo) -> str:
@@ -75,10 +81,14 @@ def build(lessons: list[dict[str, Any]], exams: list[dict[str, Any]], events: li
                 desc.append(l["teacher"])
             if l["state"] == "substitution" and l.get("original_subject"):
                 desc.append(f"statt {l['original_subject']}")
+            if l["state"] == "room-change" and l.get("original_room"):
+                desc.append(f"Raum statt {l['original_room']}")
+            if l.get("course") and l["course"] != l["subject"]:
+                desc.append(l["course"])
             if l.get("comment"):
                 desc.append(l["comment"])
             out += _event(
-                f"lesson-{l['id']}@schulbriefing",
+                _uid("lesson", l["id"]),
                 prefix + l["subject"],
                 _utc(l["date"], l["start"], tz),
                 _utc(l["date"], l["end"], tz),
@@ -89,15 +99,15 @@ def build(lessons: list[dict[str, Any]], exams: list[dict[str, Any]], events: li
     for e in exams:
         summary = f"{e['type']}: {e['subject']}"
         if e.get("start") and e.get("end"):
-            out += _event(f"exam-{e['id']}@schulbriefing", summary, _utc(e["date"], e["start"], tz),
+            out += _event(_uid("exam", str(e["id"])), summary, _utc(e["date"], e["start"], tz),
                           _utc(e["date"], e["end"], tz), description=e.get("comment") or "")
         else:
             day = date.fromisoformat(e["date"])
-            out += _event(f"exam-{e['id']}@schulbriefing", summary, day.strftime("%Y%m%d"),
+            out += _event(_uid("exam", str(e["id"])), summary, day.strftime("%Y%m%d"),
                           all_day_end=(day + timedelta(days=1)).strftime("%Y%m%d"), description=e.get("comment") or "")
     for ev in events:
         start = ev["start"]
-        uid = f"event-{ev['id']}@schulbriefing".replace(" ", "")
+        uid = _uid("event", str(ev["id"]))
         if ev["all_day"] or len(start) < 16:
             first = date.fromisoformat(start[:10])
             last = date.fromisoformat((ev["end"] or start)[:10])

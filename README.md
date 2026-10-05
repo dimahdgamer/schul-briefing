@@ -1,7 +1,7 @@
 # Schul-Briefing
 
 Eigene Web-App (PWA) für Schulmanager Online. Sie fragt Stundenplan, Vertretungen,
-Hausaufgaben, Klassenarbeiten, Noten, Elternbriefe und Nachrichten regelmäßig ab,
+Hausaufgaben, Klassenarbeiten, Elternbriefe und Nachrichten regelmäßig ab,
 erkennt Änderungen und meldet sie per Push aufs Handy. Jeden Schultag kommt morgens
 ein Briefing. Läuft im Docker-Container auf dem Raspberry Pi unter
 `https://schule.gayjetlag.de` und aktualisiert sich über GitHub selbst.
@@ -15,17 +15,16 @@ ein Briefing. Läuft im Docker-Container auf dem Raspberry Pi unter
 
 | Bereich | Was passiert |
 |---|---|
-| **Morgen-Briefing** | Push zur eingestellten Zeit (Standard 06:30), nur an Schultagen. Inhalt: Beginn und Schluss, Ausfälle („Später los: Beginn 08:50“), Vertretungen, fällige Hausaufgaben, nächste Klassenarbeit, ungelesene Post. |
+| **Morgen-Briefing** | Push nur an Schultagen. Die Uhrzeit richtet sich nach der ersten planmäßigen Stunde (1. Stunde 07:00, 2. Stunde 07:20, 3. Stunde 08:00, einstellbar), ohne Unterricht gilt eine feste Uhrzeit. Inhalt: Beginn und Schluss, Ausfälle („Später los: Beginn 08:50“), Vertretungen, fällige Hausaufgaben, nächste Klassenarbeit, ungelesene Post. |
 | **Abend-Vorschau** | Optional, am Vorabend eines Schultags (auch Sonntagabend). |
-| **Sofort-Meldungen** | Entfall, Vertretung, Raumänderung, „findet doch statt“, neue Hausaufgabe, Klassenarbeit neu/verschoben/entfernt, neue Note, neuer Elternbrief, neue Nachricht, neuer Schultermin. Jede Kategorie lässt sich einzeln abschalten. Viele Änderungen auf einmal kommen als eine Sammelnachricht. |
+| **Sofort-Meldungen** | Entfall, Vertretung, Raumänderung, „findet doch statt“, neue Hausaufgabe, Klassenarbeit neu/verschoben/entfernt, neuer Elternbrief, neue Nachricht, neuer Schultermin. Jede Kategorie lässt sich einzeln abschalten. Viele Änderungen auf einmal kommen als eine Sammelnachricht. |
 | **Klausur-Erinnerungen** | z. B. 7, 3 und 1 Tag vorher, Uhrzeit einstellbar. |
 | **Heute** | Zeitleiste der Stunden mit laufender Stunde, Pausen und Freistunden, Kacheln für Beginn, Schluss, Änderungen, Hausaufgaben und nächste Arbeit. Nach Schulschluss springt die Ansicht auf den nächsten Schultag. |
 | **Woche** | Mo–Fr mit markierten Änderungen, beliebige Wochen vor und zurück. |
-| **Aufgaben** | Hausaufgaben nach Fälligkeit mit Abhaken (nur lokal), Klassenarbeiten mit Countdown. |
-| **Noten** | Gesamtschnitt, Schnitt pro Fach, Verlauf als Diagramm, alle Noten als Tabelle. |
+| **Aufgaben** | Hausaufgaben nach Fälligkeit (nächste Stunde im jeweiligen Fach) mit Abhaken (nur lokal), Klassenarbeiten mit Countdown. |
 | **Post** | Elternbriefe und Nachrichten, Antippen öffnet Schulmanager. |
 | **Verlauf** | Jede erkannte Änderung mit Zeitstempel. |
-| **Kalender-Abo** | iCal-Link für den Handy-Kalender: Stundenplan inkl. Vertretungen, Arbeiten, Schultermine. |
+| **Kalender-Abo** | iCal-Link für den Handy-Kalender: alle Stunden von letzter Woche bis vier Wochen voraus inkl. Vertretungen, Ausfällen und Raumänderungen, dazu Arbeiten und Schultermine. |
 | **Ferien** | NRW-Ferien und Feiertage (OpenHolidays API) plus schulfreie Tage aus dem Schulkalender. In den Ferien gibt es kein Briefing, und es wird seltener abgefragt. |
 | **Offline** | Die zuletzt geladenen Daten bleiben ohne Netz sichtbar. |
 
@@ -42,6 +41,7 @@ backend/app/
   briefing.py       Tageszusammenfassung
   scheduler.py      minütlicher Taktgeber (Abruf, Briefing, Erinnerungen)
   holidays.py       Ferien/Feiertage NRW
+  bell.py           Stundenraster der Schule (Uhrzeiten je Stunde)
   push.py           Web Push (VAPID-Schlüssel werden beim ersten Start erzeugt)
   ical.py           Kalender-Feed
   demo.py           Testdaten (DEMO_MODE=1)
@@ -261,7 +261,8 @@ Module sind darin gebündelt. Nach einem fehlgeschlagenen Login pausiert die App
 | Problem | Lösung |
 |---|---|
 | Login schlägt fehl | Zugangsdaten in `.env` prüfen. Hat das Konto mehrere Profile, statt der E-Mail den Benutzernamen verwenden. 2FA wird nicht unterstützt. |
-| Ein Modul fehlt (z. B. Noten) | *Einstellungen → Status* zeigt, welches Modul nicht verfügbar ist. Die Rohantwort steht unter `/api/debug/raw/grades` (nach Anmeldung). |
+| Ein Modul fehlt | *Einstellungen → Status* zeigt, welches Modul nicht verfügbar oder bei der Schule nicht freigeschaltet ist. Die Rohantwort steht unter `/api/debug/raw/<modul>` (nach Anmeldung), z. B. `lessons` oder `homework`. |
+| Falsche Uhrzeiten | Schulmanager liefert nur Stundennummern. Die Uhrzeiten stehen in `backend/app/bell.py` und müssen bei einem neuen Stundenraster dort angepasst werden. |
 | 502 Bad Gateway | Container läuft nicht: `cd ~/schul-briefing && docker compose ps` und `docker compose logs --tail 50`. |
 | Keine Push-Nachrichten | Testnachricht senden. Auf dem iPhone muss die App vom Home-Bildschirm gestartet sein. Bei Android den Akku-Sparmodus für Chrome prüfen. |
 | Ferien falsch | `HOLIDAY_SUBDIVISION` in `.env` prüfen (NRW = `DE-NW`). |

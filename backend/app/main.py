@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, ical
+from . import bell, config, ical
 from .scheduler import Scheduler
 from .service import AppService
 
@@ -134,11 +134,7 @@ async def logout(request: Request) -> dict[str, Any]:
 
 @app.get("/api/me")
 async def me(request: Request) -> dict[str, Any]:
-    authenticated = bool(request.session.get("auth"))
-    result: dict[str, Any] = {"authenticated": authenticated, "demo": cfg.demo}
-    if authenticated:
-        result["features"] = service.features()
-    return result
+    return {"authenticated": bool(request.session.get("auth")), "demo": cfg.demo}
 
 
 # ── Daten ────────────────────────────────────────────────────────────
@@ -184,20 +180,6 @@ async def exams() -> dict[str, Any]:
     return {"today": service.today().isoformat(), "items": service.snap("exams")}
 
 
-@app.get("/api/grades", dependencies=[Depends(require_auth)])
-async def grades() -> dict[str, Any]:
-    subjects = service.snap("grades")
-    averages = [s["average"] for s in subjects if s.get("average") is not None and s["system"] == 0]
-    points = [s["average"] for s in subjects if s.get("average") is not None and s["system"] == 1]
-    return {
-        "available": service.features()["grades"],
-        "subjects": subjects,
-        "overall": round(sum(averages) / len(averages), 2) if averages else None,
-        "overall_points": round(sum(points) / len(points), 2) if points else None,
-        "updated": service.db.snapshot_time("grades"),
-    }
-
-
 @app.get("/api/inbox", dependencies=[Depends(require_auth)])
 async def inbox() -> dict[str, Any]:
     return {"letters": service.snap("letters"), "threads": service.snap("threads")}
@@ -233,6 +215,11 @@ async def sync_now() -> dict[str, Any]:
 @app.get("/api/settings", dependencies=[Depends(require_auth)])
 async def get_settings() -> dict[str, Any]:
     return service.db.settings()
+
+
+@app.get("/api/bell", dependencies=[Depends(require_auth)])
+async def bell_schedule() -> dict[str, Any]:
+    return {"hours": [{"hour": h, "start": s, "end": e} for h, (s, e) in bell.CLASS_HOURS.items()]}
 
 
 @app.put("/api/settings", dependencies=[Depends(require_auth)])

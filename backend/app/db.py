@@ -63,7 +63,13 @@ CREATE TABLE IF NOT EXISTS sync_log (
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "briefing_enabled": True,
+    # "auto": Uhrzeit hängt von der ersten planmäßigen Stunde ab, "fixed": briefing_time
+    "briefing_mode": "auto",
     "briefing_time": "06:30",
+    "briefing_by_hour": {
+        "1": "07:00", "2": "07:20", "3": "08:00", "4": "08:45", "5": "09:50",
+        "6": "10:35", "7": "11:45", "8": "12:30", "9": "13:15",
+    },
     "evening_enabled": False,
     "evening_time": "19:00",
     "reminder_enabled": True,
@@ -72,11 +78,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notify_lessons": True,
     "notify_homework": True,
     "notify_exams": True,
-    "notify_grades": True,
     "notify_letters": True,
     "notify_messages": True,
     "notify_calendar": True,
-    "grade_values_in_push": False,
     "poll_interval": 15,
     "poll_start": "06:00",
     "poll_end": "21:30",
@@ -148,6 +152,16 @@ class Database:
             default = DEFAULT_SETTINGS[key]
             if isinstance(default, bool):
                 current[key] = bool(value)
+            elif isinstance(default, dict):
+                merged = dict(current[key])
+                for hour, at in dict(value).items():
+                    if str(hour) in default:
+                        merged[str(hour)] = _validate_time(str(at))
+                current[key] = merged
+            elif key == "briefing_mode":
+                if value not in ("auto", "fixed"):
+                    raise ValueError("briefing_mode muss auto oder fixed sein")
+                current[key] = value
             elif isinstance(default, int):
                 number = int(value)
                 low, high = SETTING_LIMITS.get(key, (number, number))

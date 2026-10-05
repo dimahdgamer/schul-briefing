@@ -4,31 +4,26 @@ import { icon } from "./ui.js";
 import * as heute from "./views/heute.js";
 import * as woche from "./views/woche.js";
 import * as aufgaben from "./views/aufgaben.js";
-import * as noten from "./views/noten.js";
 import * as post from "./views/post.js";
 import * as verlauf from "./views/verlauf.js";
 import * as einstellungen from "./views/einstellungen.js";
 import * as login from "./views/login.js";
 
-const ROUTES = { heute, woche, aufgaben, noten, post, verlauf, einstellungen };
+const ROUTES = { heute, woche, aufgaben, post, verlauf, einstellungen };
 
-// Gibt die Schule keine Noten frei, nimmt der Verlauf den Platz in der Tab-Leiste ein
-function tabs() {
-  return [
-    ["heute", "Heute", "house"],
-    ["woche", "Woche", "calendar-dots"],
-    ["aufgaben", "Aufgaben", "notebook"],
-    features.grades ? ["noten", "Noten", "chart-line-up"] : ["verlauf", "Verlauf", "clock-counter-clockwise"],
-    ["post", "Post", "envelope-simple"],
-  ];
-}
+const TABS = [
+  ["heute", "Heute", "house"],
+  ["woche", "Woche", "calendar-dots"],
+  ["aufgaben", "Aufgaben", "notebook"],
+  ["post", "Post", "envelope-simple"],
+  ["verlauf", "Verlauf", "clock-counter-clockwise"],
+];
 
 const root = document.getElementById("root");
 let shellReady = false;
 let cleanup = null;
 let lastRender = 0;
 let renderToken = 0;
-let features = { grades: true };
 
 function parseHash() {
   const hash = location.hash.replace(/^#\/?/, "");
@@ -43,7 +38,7 @@ export function navigate(hash, { replace = false } = {}) {
 }
 
 function shell() {
-  const sideLinks = tabs().filter(([key]) => key !== "verlauf").map(
+  const sideLinks = TABS.filter(([key]) => key !== "verlauf").map(
     ([key, label, ic]) => `<a class="side-link" href="#/${key}" data-route="${key}">${icon(ic)}<span>${label}</span></a>`
   ).join("");
   root.innerHTML = `
@@ -61,7 +56,6 @@ function shell() {
         <header class="topbar" id="topbar">
           <a class="brand" href="#/heute"><span class="brand-mark">S</span><span class="brand-name">Schule</span></a>
           <nav class="topbar-actions" aria-label="Weitere">
-            <a class="icon-btn" href="#/verlauf" data-route="verlauf" aria-label="Verlauf">${icon("bell-simple")}<span class="badge-dot" data-badge hidden></span></a>
             <a class="icon-btn" href="#/einstellungen" data-route="einstellungen" aria-label="Einstellungen">${icon("gear-six")}</a>
           </nav>
         </header>
@@ -69,7 +63,7 @@ function shell() {
         <main class="main" id="main" tabindex="-1"></main>
       </div>
       <nav class="tabbar" aria-label="Hauptnavigation">
-        ${tabs().map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span></a>`).join("")}
+        ${TABS.map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span>${key === "verlauf" ? '<span class="badge-dot" data-badge hidden></span>' : ""}</a>`).join("")}
       </nav>
     </div>`;
 
@@ -163,7 +157,6 @@ async function boot() {
   } catch {
     me = { authenticated: true }; // offline: den gecachten Stand zeigen
   }
-  if (me.features) features = me.features;
   if (!me.authenticated) {
     navigate("#/login", { replace: true });
   } else {

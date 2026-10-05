@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { currentSubscription, disablePush, enablePush, isIos, isStandalone, pushSupported } from "../push.js";
-import { errorState, esc, icon, skeleton, timeAgo, toast } from "../ui.js";
+import { errorState, esc, icon, longDate, skeleton, timeAgo, toast } from "../ui.js";
 
 export const title = "Einstellungen";
 
@@ -8,7 +8,6 @@ const NOTIFY = [
   ["notify_lessons", "Stundenplan", "Entfall, Vertretung, Raumänderung"],
   ["notify_exams", "Klassenarbeiten", "Neu eingetragen, verschoben, entfernt"],
   ["notify_homework", "Hausaufgaben", "Neu eingetragene Aufgaben"],
-  ["notify_grades", "Noten", "Neue Noten"],
   ["notify_letters", "Elternbriefe", "Neue Briefe der Schule"],
   ["notify_messages", "Nachrichten", "Neue Nachrichten im Messenger"],
   ["notify_calendar", "Termine", "Neue Einträge im Schulkalender"],
@@ -16,7 +15,7 @@ const NOTIFY = [
 
 const REMINDER_DAYS = [1, 2, 3, 5, 7, 14];
 const MODULE_NAMES = {
-  lessons: "Stundenplan", homework: "Hausaufgaben", exams: "Klassenarbeiten", grades: "Noten",
+  lessons: "Stundenplan", homework: "Hausaufgaben", exams: "Klassenarbeiten",
   letters: "Elternbriefe", threads: "Nachrichten", calendar: "Kalender",
 };
 
@@ -68,6 +67,63 @@ function pushSection(state) {
     </div>`;
 }
 
+function nextBriefingText(next, enabled) {
+  if (!enabled) return "Das Morgen-Briefing ist ausgeschaltet.";
+  if (!next) return "";
+  const why = next.mode === "auto"
+    ? ` (erste Stunde: ${esc(next.first_hour)}.)`
+    : next.mode === "auto-fallback" ? " (kein Unterricht eingetragen, deshalb die feste Uhrzeit)" : "";
+  return `Nächstes Briefing: ${esc(longDate(next.date))} um <span class="mono">${esc(next.time)}</span>${why}`;
+}
+
+function briefingSection(s, status, bell) {
+  const auto = s.briefing_mode === "auto";
+  const hours = bell.hours.filter((h) => h.hour in s.briefing_by_hour);
+  return `
+    <div class="card">
+      <div class="field">
+        <div><div class="field-label">Briefing am Morgen</div><div class="field-help">Nur an Schultagen, nicht in den Ferien</div></div>
+        ${toggle("briefing_enabled", s, "Briefing am Morgen")}
+      </div>
+      <div class="field">
+        <div class="field-label">Uhrzeit</div>
+        <div class="segmented" role="group" aria-label="Uhrzeit des Briefings">
+          <button type="button" data-mode="auto" aria-pressed="${auto}">Nach erster Stunde</button>
+          <button type="button" data-mode="fixed" aria-pressed="${!auto}">Fest</button>
+        </div>
+      </div>
+      <div class="field stack" id="briefing-auto" ${auto ? "" : "hidden"}>
+        <div class="field-help">Das Briefing kommt abhängig davon, zu welcher Stunde du laut Plan anfängst. Fällt die erste Stunde aus, gilt trotzdem ihre Uhrzeit, damit du es rechtzeitig erfährst.</div>
+        <div class="hour-grid">
+          ${hours.map((h) => `
+            <label class="hour-cell">
+              <span><span class="mono">${esc(h.hour)}.</span> Stunde <span class="muted mono">${esc(h.start)}</span></span>
+              <input type="time" class="input" data-hour="${esc(h.hour)}" value="${esc(s.briefing_by_hour[h.hour])}" step="300" aria-label="Briefing bei Beginn zur ${esc(h.hour)}. Stunde" />
+            </label>`).join("")}
+        </div>
+        <div class="field-help">Ist an einem Schultag kein Unterricht eingetragen, gilt die feste Uhrzeit.</div>
+      </div>
+      <div class="field" id="briefing-fixed">
+        <div class="field-label">${auto ? "Feste Uhrzeit (Ersatz)" : "Feste Uhrzeit"}</div>
+        ${time("briefing_time", s, "Feste Uhrzeit Morgen-Briefing")}
+      </div>
+      <div class="field"><div class="field-help" id="next-briefing">${nextBriefingText(status.next_briefing, s.briefing_enabled)}</div></div>
+      <div class="field">
+        <div><div class="field-label">Abend-Vorschau</div><div class="field-help">Am Vorabend eines Schultags, auch Sonntagabend</div></div>
+        ${toggle("evening_enabled", s, "Abend-Vorschau")}
+      </div>
+      <div class="field"><div class="field-label">Uhrzeit</div>${time("evening_time", s, "Uhrzeit Abend-Vorschau")}</div>
+      <div class="field stack">
+        <div class="btn-row">
+          <button class="btn small" data-action="preview" data-kind="morning">Vorschau Morgen</button>
+          <button class="btn small" data-action="preview" data-kind="evening">Vorschau Abend</button>
+          <button class="btn small ghost" data-action="send-briefing">${icon("bell-ringing", "sm")}Briefing jetzt senden</button>
+        </div>
+        <div id="preview"></div>
+      </div>
+    </div>`;
+}
+
 function statusSection(status) {
   const account = status.account || {};
   const moduleErrors = Object.entries(status.module_errors || {});
@@ -84,20 +140,21 @@ function statusSection(status) {
       ${status.last_error ? `<div class="field"><div class="notice red" style="width:100%">${icon("warning-circle")}<p>${esc(status.last_error)}</p></div></div>` : ""}
       ${(status.disabled_modules || []).length ? `<div class="field"><div class="field-help">Bei deiner Schule nicht freigeschaltet: ${status.disabled_modules.map((k) => esc(MODULE_NAMES[k] || k)).join(", ")}</div></div>` : ""}
       ${moduleErrors.length ? `<div class="field"><div class="field-help">Nicht verfügbar: ${moduleErrors.map(([k, v]) => `${esc(MODULE_NAMES[k] || k)} (${esc(v)})`).join(", ")}</div></div>` : ""}
-      ${syncs ? `<div class="field stack"><table class="grade-table"><thead><tr><th>Abruf</th><th>Auslöser</th><th class="num">Ergebnis</th></tr></thead><tbody>${syncs}</tbody></table></div>` : ""}
+      ${syncs ? `<div class="field stack"><table class="data-table"><thead><tr><th>Abruf</th><th>Auslöser</th><th class="num">Ergebnis</th></tr></thead><tbody>${syncs}</tbody></table></div>` : ""}
     </div>`;
 }
 
 export async function render(main, params, ctx) {
   main.innerHTML = skeleton(6);
-  let settings, status, ical, subscription, devices;
+  let settings, status, ical, subscription, devices, bell;
   try {
-    [settings, status, ical, subscription, devices] = await Promise.all([
+    [settings, status, ical, subscription, devices, bell] = await Promise.all([
       api("/settings"),
       api("/status"),
       api("/ical"),
       currentSubscription().catch(() => null),
       api("/push/devices").then((d) => d.devices.length),
+      api("/bell"),
     ]);
   } catch (error) {
     if (!ctx.isCurrent()) return;
@@ -108,7 +165,6 @@ export async function render(main, params, ctx) {
   if (!ctx.isCurrent()) return;
   const s = settings;
   const theme = readTheme();
-  const gradesOn = !(status.disabled_modules || []).includes("grades");
 
   main.innerHTML = `
     <header class="view-head reveal">
@@ -123,26 +179,7 @@ export async function render(main, params, ctx) {
 
     <section class="section reveal" style="--i:2">
       <h2 class="section-title">Morgen-Briefing</h2>
-      <div class="card">
-        <div class="field">
-          <div><div class="field-label">Briefing am Morgen</div><div class="field-help">Nur an Schultagen, nicht in den Ferien</div></div>
-          ${toggle("briefing_enabled", s, "Briefing am Morgen")}
-        </div>
-        <div class="field"><div class="field-label">Uhrzeit</div>${time("briefing_time", s, "Uhrzeit Morgen-Briefing")}</div>
-        <div class="field">
-          <div><div class="field-label">Abend-Vorschau</div><div class="field-help">Am Vorabend eines Schultags, auch Sonntagabend</div></div>
-          ${toggle("evening_enabled", s, "Abend-Vorschau")}
-        </div>
-        <div class="field"><div class="field-label">Uhrzeit</div>${time("evening_time", s, "Uhrzeit Abend-Vorschau")}</div>
-        <div class="field stack">
-          <div class="btn-row">
-            <button class="btn small" data-action="preview" data-kind="morning">Vorschau Morgen</button>
-            <button class="btn small" data-action="preview" data-kind="evening">Vorschau Abend</button>
-            <button class="btn small ghost" data-action="send-briefing">${icon("bell-ringing", "sm")}Briefing jetzt senden</button>
-          </div>
-          <div id="preview"></div>
-        </div>
-      </div>
+      ${briefingSection(s, status, bell)}
     </section>
 
     <section class="section reveal" style="--i:3">
@@ -162,11 +199,7 @@ export async function render(main, params, ctx) {
     <section class="section reveal" style="--i:4">
       <h2 class="section-title">Sofort melden</h2>
       <div class="card">
-        ${NOTIFY.filter(([key]) => gradesOn || key !== "notify_grades").map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`).join("")}
-        <div class="field" ${gradesOn ? "" : "hidden"}>
-          <div><div class="field-label">Notenwert in der Nachricht</div><div class="field-help">Aus: nur „Neue Note in Mathe“, damit die Note nicht auf dem Sperrbildschirm steht</div></div>
-          ${toggle("grade_values_in_push", s, "Notenwert in der Nachricht")}
-        </div>
+        ${NOTIFY.map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`).join("")}
       </div>
     </section>
 
@@ -239,11 +272,24 @@ export async function render(main, params, ctx) {
     try {
       Object.assign(s, await api("/settings", { method: "PUT", body }));
       toast("Gespeichert");
+      refreshNext();
     } catch (error) {
       toast(error.message, "error");
     }
   };
+  const refreshNext = async () => {
+    try {
+      const fresh = await api("/status");
+      const el = main.querySelector("#next-briefing");
+      if (el) el.innerHTML = nextBriefingText(fresh.next_briefing, s.briefing_enabled);
+    } catch {
+      // Nur eine Anzeige, Fehler hier sind egal.
+    }
+  };
   const save = (patch) => {
+    if (patch.briefing_by_hour) {
+      patch = { ...patch, briefing_by_hour: { ...(pending.briefing_by_hour || {}), ...patch.briefing_by_hour } };
+    }
     Object.assign(pending, patch);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flush, 400);
@@ -256,6 +302,22 @@ export async function render(main, params, ctx) {
       if (input.tagName === "SELECT") value = Number(value);
       if (input.type === "time" && !value) return;
       save({ [key]: value });
+    });
+  });
+
+  main.querySelectorAll("[data-hour]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.value) save({ briefing_by_hour: { [input.dataset.hour]: input.value } });
+    });
+  });
+
+  main.querySelectorAll("[data-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.mode;
+      main.querySelectorAll("[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+      main.querySelector("#briefing-auto").hidden = mode !== "auto";
+      main.querySelector("#briefing-fixed .field-label").textContent = mode === "auto" ? "Feste Uhrzeit (Ersatz)" : "Feste Uhrzeit";
+      save({ briefing_mode: mode });
     });
   });
 

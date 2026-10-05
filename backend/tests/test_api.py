@@ -57,7 +57,6 @@ def test_endpoints_return_data(client):
     week = http.get(f"/api/week?start={monday}").json()
     assert len(week["days"]) == 5
 
-    assert http.get("/api/grades").json()["subjects"]
     assert http.get("/api/homework").json()["items"]
     assert http.get("/api/inbox").json()["letters"]
 
@@ -108,17 +107,51 @@ def test_disabled_module_is_not_an_error(client, monkeypatch):
     sync = main.service.sync
     original = sync._fetch_raw
 
-    async def without_grades(today):
+    async def without_messenger(today):
         raw = await original(today)
-        raw["grades"] = (False, None, 403)
+        raw["threads"] = (False, None, 403)
         return raw
 
-    monkeypatch.setattr(sync, "_fetch_raw", without_grades)
+    monkeypatch.setattr(sync, "_fetch_raw", without_messenger)
     result = asyncio.run(sync.run("test"))
-    assert result["ok"] and "grades" not in result["module_errors"]
+    assert result["ok"] and "threads" not in result["module_errors"]
 
     http.post("/api/login", json={"password": "geheim"})
-    assert http.get("/api/me").json()["features"] == {"grades": False}
-    assert http.get("/api/grades").json()["available"] is False
     status = http.get("/api/status").json()
-    assert status["disabled_modules"] == ["grades"] and status["module_errors"] == {}
+    assert status["disabled_modules"] == ["threads"] and status["module_errors"] == {}
+
+
+def test_briefing_time_follows_first_planned_lesson(client):
+    _, main = client
+    service = main.service
+    day = date(2026, 10, 6)
+
+    def plan(*hours, cancelled=()):
+        service.db.save_snapshot("lessons", [
+            {"date": day.isoformat(), "hour": h, "state": "cancelled" if h in cancelled else "regular"}
+            for h in hours
+        ])
+
+    plan("1", "2", "3")
+    assert service.briefing_time_for(day)["time"] == "07:00"
+    plan("2", "3")
+    assert service.briefing_time_for(day)["time"] == "07:20"
+    plan("3", "4")
+    assert service.briefing_time_for(day)["time"] == "08:00"
+    plan("1", "3", cancelled=("1",))  # planmäßig erste Stunde, auch wenn sie ausfällt
+    assert service.briefing_time_for(day)["time"] == "07:00"
+    plan()  # kein Unterricht eingetragen: feste Uhrzeit
+    assert service.briefing_time_for(day)["time"] == "06:30"
+
+    service.db.update_settings({"briefing_by_hour": {"2": "07:10"}})
+    plan("2")
+    assert service.briefing_time_for(day)["time"] == "07:10"
+    service.db.update_settings({"briefing_mode": "fixed", "briefing_time": "06:45"})
+    assert service.briefing_time_for(day)["time"] == "06:45"
+
+
+def test_settings_reject_bad_briefing_values(client):
+    http, _ = client
+    http.post("/api/login", json={"password": "geheim"})
+    assert http.put("/api/settings", json={"briefing_mode": "egal"}).status_code == 400
+    assert http.put("/api/settings", json={"briefing_by_hour": {"1": "26:00"}}).status_code == 400
