@@ -1,0 +1,275 @@
+"""Demo-Datenquelle im Format der echten API.
+
+Wird mit DEMO_MODE=1 aktiviert. Jeder Abruf verändert mit einer gewissen
+Wahrscheinlichkeit etwas (Entfall, neue Note, neuer Brief …), damit sich
+Änderungserkennung und Push ohne echtes Konto ausprobieren lassen.
+"""
+
+from __future__ import annotations
+
+import random
+from datetime import date, datetime, timedelta
+from typing import Any, Callable
+
+from .db import Database
+
+HOURS = {
+    "1": ("08:00", "08:45"), "2": ("08:50", "09:35"), "3": ("09:55", "10:40"),
+    "4": ("10:45", "11:30"), "5": ("11:50", "12:35"), "6": ("12:40", "13:25"),
+    "7": ("13:45", "14:30"), "8": ("14:30", "15:15"),
+}
+
+# Fach, Kürzel, Lehrkraft, Raum
+SUBJECTS = {
+    "M": ("Mathematik", "M", "Kowalski", "A204"),
+    "D": ("Deutsch", "D", "Hoffmann", "A112"),
+    "E": ("Englisch", "E", "Yilmaz", "A115"),
+    "BI": ("Biologie", "BI", "Schäfer", "N03"),
+    "PH": ("Physik", "PH", "Lindner", "N12"),
+    "GE": ("Geschichte", "GE", "Becker", "A208"),
+    "SP": ("Sport", "SP", "Neumann", "Turnhalle 2"),
+    "KU": ("Kunst", "KU", "Vogt", "K01"),
+    "IF": ("Informatik", "IF", "Krüger", "C014"),
+    "EK": ("Erdkunde", "EK", "Brandt", "A210"),
+    "F": ("Französisch", "F", "Dubois", "A117"),
+    "MU": ("Musik", "MU", "Wagner", "M02"),
+}
+
+WEEK = {
+    0: ["M", "M", "D", "E", "BI", "GE"],
+    1: ["E", "PH", "PH", "D", "SP", "SP", "IF"],
+    2: ["F", "M", "GE", "EK", "D", "KU", "KU"],
+    3: ["D", "E", "M", "BI", "F", "MU"],
+    4: ["IF", "IF", "EK", "M", "E", "F"],
+}
+
+SUBSTITUTES = ["Lorenz", "Pohl", "Arslan", "Weber"]
+
+HOMEWORK_TEXTS = {
+    "M": ["S. 84 Nr. 3a–d und 5", "Arbeitsblatt Lineare Funktionen fertig machen", "Übungsaufgaben zur Klassenarbeit, S. 92"],
+    "D": ["Inhaltsangabe zu Kapitel 4 schreiben", "Gedicht analysieren (Strophe 1–3)", "Lesen bis S. 120"],
+    "E": ["Workbook p. 37, ex. 2 and 4", "Vocabulary Unit 3 lernen", "Write a short e-mail to a friend (120 words)"],
+    "BI": ["Protokoll zum Versuch vervollständigen", "Zellaufbau: Skizze beschriften"],
+    "PH": ["Aufgaben 1–4 zum Ohmschen Gesetz", "Versuchsauswertung als Diagramm"],
+    "GE": ["Quelle M5 bearbeiten", "Zeitstrahl Weimarer Republik ergänzen"],
+    "IF": ["Python-Programm zur Notenberechnung erweitern"],
+    "EK": ["Klimadiagramm Kairo auswerten"],
+    "F": ["Vokabeln Leçon 4", "Cahier S. 22 Nr. 1–3"],
+}
+
+LETTERS = [
+    ("Wandertag der Jahrgangsstufe", "Schulleitung"),
+    ("Elternsprechtag: Anmeldung geöffnet", "Sekretariat"),
+    ("Information zur Busverbindung während der Bauarbeiten", "Schulleitung"),
+    ("Einladung zur Klassenpflegschaftssitzung", "Klassenleitung"),
+    ("Fotograf am Donnerstag", "Sekretariat"),
+]
+
+STATE_KEY = "demo_state"
+
+
+class DemoSource:
+    def __init__(self, db: Database, is_school_day: Callable[[date], bool] | None = None) -> None:
+        self.db = db
+        self.rng = random.Random()
+        self.is_school_day = is_school_day or (lambda d: d.weekday() < 5)
+
+    @property
+    def user(self) -> dict[str, Any]:
+        return {
+            "id": 1,
+            "firstname": "Demo",
+            "lastname": "Schüler",
+            "institutionId": 1,
+            "associatedStudent": {"id": 4711, "firstname": "Demo", "lastname": "Schüler", "className": "9b"},
+        }
+
+    # ── Zustand ──────────────────────────────────────────────────────
+
+    def _state(self, today: date) -> dict[str, Any]:
+        state = self.db.get(STATE_KEY)
+        if state:
+            return state
+        rng = random.Random(today.toordinal())
+        state = {"tick": 0, "overrides": {}, "homework": [], "exams": [], "grades": [], "letters": [], "threads": [], "next_id": 1000}
+        # Ein paar Änderungen für heute und morgen
+        for offset in (0, 1, 3):
+            d = today + timedelta(days=offset)
+            if d.weekday() < 5:
+                self._random_override(state, d, rng)
+        # Hausaufgaben der letzten Tage
+        for back in range(1, 8):
+            d = today - timedelta(days=back)
+            if d.weekday() < 5:
+                for code in rng.sample(WEEK[d.weekday()], k=min(2, len(WEEK[d.weekday()]))):
+                    self._add_homework(state, d, code, rng)
+        # Klassenarbeiten
+        for offset, code, kind in ((3, "M", "Klassenarbeit"), (9, "E", "Test"), (16, "D", "Klassenarbeit"), (24, "BI", "Test")):
+            self._add_exam(state, today + timedelta(days=offset), code, kind)
+        # Noten
+        for code in ("M", "D", "E", "BI", "PH", "GE", "F", "IF"):
+            for back in sorted(rng.sample(range(5, 60), k=rng.randint(2, 4)), reverse=True):
+                self._add_grade(state, code, today - timedelta(days=back), rng)
+        # Post
+        for i, (title, sender) in enumerate(LETTERS[:3]):
+            self._add_letter(state, title, sender, today - timedelta(days=i * 4 + 1), read=i > 0)
+        state["threads"] = [
+            {"id": 501, "threadId": 9001, "unreadCount": 1, "isArchived": False,
+             "thread": {"id": 9001, "subject": "Material für Kunst", "senderString": "Vogt, Kunst",
+                        "lastMessageTimestamp": f"{today.isoformat()}T07:12:00", "lastMessage": {"text": "Bitte bis Mittwoch Wasserfarben mitbringen."}}},
+            {"id": 502, "threadId": 9002, "unreadCount": 0, "isArchived": False,
+             "thread": {"id": 9002, "subject": "AG Robotik", "senderString": "Krüger",
+                        "lastMessageTimestamp": f"{(today - timedelta(days=3)).isoformat()}T15:40:00", "lastMessage": {"text": "Treffen diese Woche im C014."}}},
+        ]
+        self.db.set(STATE_KEY, state)
+        return state
+
+    def _next_id(self, state: dict[str, Any]) -> int:
+        state["next_id"] += 1
+        return state["next_id"]
+
+    def _random_override(self, state: dict[str, Any], d: date, rng: random.Random) -> None:
+        plan = WEEK[d.weekday()]
+        hour = rng.randint(1, len(plan))
+        key = f"{d.isoformat()}#{hour}"
+        kind = rng.choice(["cancelled", "cancelled", "substitution", "room"])
+        if kind == "cancelled":
+            state["overrides"][key] = {"type": "cancelled"}
+        elif kind == "substitution":
+            code = rng.choice([c for c in SUBJECTS if c != plan[hour - 1]])
+            state["overrides"][key] = {"type": "substitution", "subject": code, "teacher": rng.choice(SUBSTITUTES)}
+        else:
+            state["overrides"][key] = {"type": "room", "room": rng.choice(["B112", "A001", "C105", "Aula"])}
+
+    def _add_homework(self, state: dict[str, Any], d: date, code: str, rng: random.Random) -> None:
+        texts = HOMEWORK_TEXTS.get(code)
+        if not texts:
+            return
+        state["homework"].append({"date": d.isoformat(), "subject": SUBJECTS[code][0], "homework": rng.choice(texts),
+                                  "teacher": {"lastname": SUBJECTS[code][2]}})
+
+    def _add_exam(self, state: dict[str, Any], d: date, code: str, kind: str) -> None:
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        hour = str(WEEK[d.weekday()].index(code) + 1) if code in WEEK[d.weekday()] else "3"
+        state["exams"].append({
+            "id": self._next_id(state), "date": d.isoformat(),
+            "subject": {"name": SUBJECTS[code][0], "abbreviation": code},
+            "type": {"name": kind}, "comment": "",
+            "classHour": {"number": hour, "from": HOURS[hour][0] + ":00", "until": HOURS[hour][1] + ":00"},
+        })
+
+    def _add_grade(self, state: dict[str, Any], code: str, d: date, rng: random.Random) -> None:
+        value = rng.choice(["1", "2+", "2", "2-", "3+", "3", "3-", "4", "2", "1-"])
+        state["grades"].append({"id": self._next_id(state), "code": code, "value": f"0~{value}",
+                                "date": d.isoformat(), "weight": rng.choice([1, 1, 2]),
+                                "type": rng.choice(["Test", "Mündlich", "Klassenarbeit", "Hausaufgabe"])})
+
+    def _add_letter(self, state: dict[str, Any], title: str, sender: str, d: date, read: bool) -> None:
+        letter_id = self._next_id(state)
+        state["letters"].append({
+            "id": letter_id, "title": title, "senderName": sender, "sentDate": f"{d.isoformat()}T09:30:00",
+            "studentStatuses": [{"id": letter_id * 10, "studentId": 4711,
+                                 "readTimestamp": f"{d.isoformat()}T12:00:00" if read else None}],
+        })
+
+    def _mutate(self, state: dict[str, Any], today: date) -> None:
+        rng = self.rng
+        state["tick"] += 1
+        if rng.random() > 0.6:
+            return
+        action = rng.choice(["override", "override", "restore", "homework", "grade", "letter", "message", "exam"])
+        upcoming = [today + timedelta(days=i) for i in range(0, 8) if (today + timedelta(days=i)).weekday() < 5]
+        if action == "override" and upcoming:
+            self._random_override(state, rng.choice(upcoming[:3]), rng)
+        elif action == "restore" and state["overrides"]:
+            state["overrides"].pop(rng.choice(sorted(state["overrides"])))
+        elif action == "homework":
+            day = today if today.weekday() < 5 else today - timedelta(days=today.weekday() - 4)
+            self._add_homework(state, day, rng.choice(WEEK[day.weekday()]), rng)
+        elif action == "grade":
+            self._add_grade(state, rng.choice(["M", "D", "E", "BI", "PH"]), today, rng)
+        elif action == "letter":
+            title, sender = rng.choice(LETTERS)
+            self._add_letter(state, title, sender, today, read=False)
+        elif action == "message" and state["threads"]:
+            thread = rng.choice(state["threads"])
+            thread["unreadCount"] += 1
+            thread["thread"]["lastMessageTimestamp"] = datetime.now().isoformat(timespec="seconds")
+            thread["thread"]["lastMessage"]["text"] = rng.choice(
+                ["Kurze Erinnerung an morgen.", "Danke für die Rückmeldung!", "Raum hat sich geändert."]
+            )
+        elif action == "exam":
+            self._add_exam(state, today + timedelta(days=rng.randint(5, 20)), rng.choice(["PH", "GE", "F", "EK"]), "Test")
+
+    # ── Rohdaten im API-Format ───────────────────────────────────────
+
+    def fetch(self, today: date, lesson_start: date, lesson_end: date, mutate: bool = True) -> dict[str, Any]:
+        state = self._state(today)
+        if mutate:
+            self._mutate(state, today)
+            self.db.set(STATE_KEY, state)
+        return {
+            "lessons": self.lessons(state, lesson_start, lesson_end),
+            "homework": state["homework"],
+            "exams": state["exams"],
+            "grades": self._grades(state),
+            "letters": state["letters"],
+            "threads": state["threads"],
+            "calendar": self._calendar(today),
+        }
+
+    def lessons(self, state: dict[str, Any] | None, start: date, end: date) -> list[dict[str, Any]]:
+        state = state or self.db.get(STATE_KEY) or {"overrides": {}}
+        out = []
+        d = start
+        while d <= end:
+            plan = WEEK.get(d.weekday())
+            if plan and self.is_school_day(d):
+                for index, code in enumerate(plan, start=1):
+                    hour = str(index)
+                    name, abbr, teacher, room = SUBJECTS[code]
+                    regular = {"subject": {"name": name, "abbreviation": abbr}, "subjectLabel": name,
+                               "teachers": [{"lastname": teacher, "abbreviation": teacher[:3].upper()}],
+                               "room": {"name": room}}
+                    item: dict[str, Any] = {
+                        "date": d.isoformat(),
+                        "classHour": {"number": hour, "from": HOURS[hour][0] + ":00", "until": HOURS[hour][1] + ":00"},
+                        "actualLesson": regular,
+                    }
+                    override = state["overrides"].get(f"{d.isoformat()}#{hour}")
+                    if override:
+                        item["originalLessons"] = [regular]
+                        if override["type"] == "cancelled":
+                            item["actualLesson"] = None
+                            item["isCancelled"] = True
+                        elif override["type"] == "substitution":
+                            s_name, s_abbr, _t, s_room = SUBJECTS[override["subject"]]
+                            item["actualLesson"] = {"subject": {"name": s_name, "abbreviation": s_abbr}, "subjectLabel": s_name,
+                                                    "teachers": [{"lastname": override["teacher"]}], "room": {"name": s_room}}
+                            item["isSubstitution"] = True
+                        else:
+                            item["actualLesson"] = dict(regular, room={"name": override["room"]})
+                    out.append(item)
+            d += timedelta(days=1)
+        return out
+
+    def _grades(self, state: dict[str, Any]) -> dict[str, Any]:
+        codes = sorted({g["code"] for g in state["grades"]})
+        subjects = [{"id": i, "name": SUBJECTS[c][0], "abbreviation": c} for i, c in enumerate(codes, start=1)]
+        by_code = {c: i for i, c in enumerate(codes, start=1)}
+        courses = []
+        for code in codes:
+            courses.append({
+                "id": 100 + by_code[code], "subjectId": by_code[code], "gradingPreset": {"gradingSystem": 0},
+                "grades": [{"id": g["id"], "value": g["value"], "date": g["date"], "weight": g["weight"],
+                            "gradeType": {"name": g["type"]}} for g in state["grades"] if g["code"] == code],
+            })
+        return {"subjects": subjects, "courses": courses, "finalGrades": []}
+
+    def _calendar(self, today: date) -> dict[str, Any]:
+        d = today + timedelta(days=(3 - today.weekday()) % 7 + 7)
+        return {"nonRecurringEvents": [
+            {"id": 77, "summary": "Wandertag", "start": f"{d.isoformat()}T00:00:00", "end": f"{(d + timedelta(days=1)).isoformat()}T00:00:00", "allDay": True, "categoryId": 3},
+            {"id": 78, "summary": "Elternsprechtag", "start": f"{(today + timedelta(days=12)).isoformat()}T15:00:00", "end": f"{(today + timedelta(days=12)).isoformat()}T19:00:00", "allDay": False, "categoryId": 2, "location": "Aula"},
+        ], "recurringEvents": []}

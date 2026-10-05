@@ -1,0 +1,11 @@
+.env
+.git
+.github
+.agents
+data
+data-*
+*.log
+**/__pycache__
+**/.pytest_cache
+backend/.venv
+backend/tests

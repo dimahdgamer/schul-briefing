@@ -1,0 +1,22 @@
+{
+  "name": "Schul-Briefing",
+  "short_name": "Schule",
+  "description": "Stundenplan, Vertretungen, Hausaufgaben und Noten mit Morgen-Briefing.",
+  "lang": "de",
+  "start_url": "/#/heute",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f6f3",
+  "theme_color": "#f7f6f3",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Woche", "url": "/#/woche" },
+    { "name": "Aufgaben", "url": "/#/aufgaben" },
+    { "name": "Noten", "url": "/#/noten" }
+  ]
+}

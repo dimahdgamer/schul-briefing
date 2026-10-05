@@ -1,0 +1,20 @@
+# Läuft auf dem Pi in ~/schul-briefing. Das Image kommt fertig von GitHub (ghcr.io).
+# Achtung: update.sh überschreibt diese Datei bei jedem Update mit der Version aus dem Image.
+# Eigene Werte deshalb nur in .env eintragen.
+
+services:
+  schule:
+    image: ${IMAGE:?IMAGE fehlt in .env}
+    container_name: schul-briefing
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+    # Nur auf dem Pi selbst erreichbar, nach außen geht es über Cloudflare/nginx
+    ports:
+      - "127.0.0.1:${APP_PORT:-8470}:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
