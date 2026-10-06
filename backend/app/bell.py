@@ -38,6 +38,16 @@ def last_number(hour: str) -> str:
     return numbers[-1] if numbers else ""
 
 
+def hour_at(hhmm: str) -> str:
+    """Nummer der Stunde, in der die Uhrzeit liegt. In einer Pause die folgende Stunde."""
+    if not re.match(r"^\d{2}:\d{2}$", hhmm or ""):
+        return ""
+    for number, (_start, end) in CLASS_HOURS.items():
+        if hhmm < end:
+            return number
+    return ""
+
+
 def times_for(hour: str) -> tuple[str, str]:
     """Beginn und Ende einer Stunde laut Raster, auch für Doppelstunden wie '5/6'."""
     start = CLASS_HOURS.get(first_number(hour), ("", ""))[0]

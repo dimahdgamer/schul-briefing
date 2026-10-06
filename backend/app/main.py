@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import bell, config, ical
+from . import bell, config, ical, own
 from .scheduler import Scheduler
 from .service import AppService
 
@@ -184,7 +184,67 @@ async def homework_done(hw_id: str, body: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/exams", dependencies=[Depends(require_auth)])
 async def exams() -> dict[str, Any]:
-    return {"today": service.today().isoformat(), "items": service.snap("exams")}
+    return {"today": service.today().isoformat(), "items": service.exams()}
+
+
+# ── Eigene Einträge: Klausuren und Beurlaubungen ─────────────────────
+
+OWN_CLEANERS = {"exams": own.clean_exam, "leaves": own.clean_leave}
+
+
+def _own_cleaner(kind: str):
+    if kind not in OWN_CLEANERS:
+        raise HTTPException(status_code=404)
+    return OWN_CLEANERS[kind]
+
+
+def _own_clean(kind: str, body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _own_cleaner(kind)(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/own", dependencies=[Depends(require_auth)])
+async def own_entries() -> dict[str, Any]:
+    return {
+        "today": service.today().isoformat(),
+        "exams": service.own("exams"),
+        "leaves": service.own("leaves"),
+        "subjects": service.subjects(),
+        "hours": [{"hour": h, "start": s, "end": e} for h, (s, e) in bell.CLASS_HOURS.items()],
+    }
+
+
+@app.post("/api/own/{kind}", dependencies=[Depends(require_auth)])
+async def own_create(kind: str, body: dict[str, Any]) -> dict[str, Any]:
+    item = {"id": own.new_id(), **_own_clean(kind, body)}
+    items = service.own(kind)
+    if len(items) >= own.MAX_ENTRIES:
+        raise HTTPException(status_code=400, detail="Zu viele Einträge. Bitte alte löschen.")
+    service.db.set(f"own_{kind}", items + [item])
+    return item
+
+
+@app.put("/api/own/{kind}/{item_id}", dependencies=[Depends(require_auth)])
+async def own_update(kind: str, item_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    cleaned = _own_clean(kind, body)
+    items = service.own(kind)
+    if not any(i["id"] == item_id for i in items):
+        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+    updated = {"id": item_id, **cleaned}
+    service.db.set(f"own_{kind}", [updated if i["id"] == item_id else i for i in items])
+    return updated
+
+
+@app.delete("/api/own/{kind}/{item_id}", dependencies=[Depends(require_auth)])
+async def own_delete(kind: str, item_id: str) -> dict[str, Any]:
+    _own_cleaner(kind)
+    items = service.own(kind)
+    if not any(i["id"] == item_id for i in items):
+        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+    service.db.set(f"own_{kind}", [i for i in items if i["id"] != item_id])
+    return {"ok": True}
 
 
 @app.get("/api/inbox", dependencies=[Depends(require_auth)])
@@ -316,8 +376,9 @@ async def ical_feed(token: str, lessons: int = 1) -> Response:
     expected = service.db.get("ical_token")
     if not expected or not hmac.compare_digest(token.encode(), str(expected).encode()):
         raise HTTPException(status_code=404)
-    body = ical.build(service.snap("lessons"), service.snap("exams"),
-                      [e for e in service.snap("calendar") if not e["is_holiday"]], cfg.tz, bool(lessons))
+    body = ical.build(service.lessons(), service.exams(),
+                      [e for e in service.snap("calendar") if not e["is_holiday"]], cfg.tz, bool(lessons),
+                      service.own("leaves"))
     return Response(body, media_type="text/calendar; charset=utf-8",
                     headers={"Content-Disposition": 'inline; filename="schule.ics"'})
 

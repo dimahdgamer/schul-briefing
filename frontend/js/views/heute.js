@@ -8,6 +8,7 @@ export const title = "Heute";
 
 function lede(day, data) {
   const brk = day.break;
+  if (day.full_leave && day.school_day) return "Du bist beurlaubt und musst nicht in die Schule.";
   if (!day.lessons.length) {
     if (brk && brk.kind !== "weekend") {
       return `${esc(brk.name)}. Die Schule beginnt wieder am ${esc(longDate(brk.back))}.`;
@@ -17,6 +18,7 @@ function lede(day, data) {
     return "Für diesen Tag ist kein Unterricht eingetragen.";
   }
   if (day.all_cancelled) {
+    if (day.lessons.some((l) => l.state === "leave")) return "Du bist beurlaubt und musst nicht in die Schule.";
     return day.has_eva ? "Nur EVA oder Entfall, du musst nicht in die Schule." : "Der gesamte Unterricht fällt aus.";
   }
   const parts = [];
@@ -34,6 +36,8 @@ function lede(day, data) {
 
 function lessonRow(lesson, index) {
   const meta = [];
+  const isExam = lesson.state === "exam";
+  if (isExam) meta.push(`<span class="mono">${esc(lesson.start)}–${esc(lesson.end)} Uhr</span>`);
   if (lesson.state === "substitution" && lesson.original_subject && lesson.original_subject !== lesson.subject) {
     meta.push(`<span class="was">statt ${esc(lesson.original_subject)}</span>`);
   }
@@ -43,24 +47,27 @@ function lessonRow(lesson, index) {
     const was = lesson.state === "room-change" && lesson.original_room ? ` <span class="was">statt ${esc(lesson.original_room)}</span>` : "";
     meta.push(`<span class="mono">${esc(lesson.room)}</span>${was}`);
   }
+  // Eine Klausur hat keine Stundennummer: der Anfangsbuchstabe der Art (K, T) steht an ihrer Stelle
+  const hour = isExam ? (lesson.exam_type || "K")[0].toUpperCase() : lesson.hour || "–";
+  const tag = isExam ? `<span class="tag red">${esc(lesson.exam_type || "Klausur")}</span>` : stateTag(lesson.state);
   return `
     <li class="lesson is-${esc(lesson.state)} reveal" style="--i:${index}" data-start="${esc(lesson.start)}" data-end="${esc(lesson.end)}">
       <div class="lesson-time">
-        <span class="lesson-hour">${esc(lesson.hour || "–")}</span>
+        <span class="lesson-hour">${esc(hour)}</span>
         <span class="lesson-clock">${esc(lesson.start)}</span>
       </div>
       <div class="lesson-body">
         <div class="lesson-subject">${esc(lesson.subject)}</div>
         <div class="lesson-meta">${meta.join("<span aria-hidden=\"true\">·</span>")}</div>
       </div>
-      <div class="lesson-state">${stateTag(lesson.state)}</div>
+      <div class="lesson-state">${tag}</div>
       ${lesson.comment ? `<div class="lesson-note">${esc(lesson.comment)}</div>` : ""}
       <span class="now-progress" hidden></span>
     </li>`;
 }
 
-// Entfall und EVA: dafür muss man nicht in der Schule sein
-const isFree = (lesson) => lesson.state === "cancelled" || lesson.state === "eva";
+// Entfall, EVA und Beurlaubung: dafür muss man nicht in der Schule sein
+const isFree = (lesson) => ["cancelled", "eva", "leave"].includes(lesson.state);
 
 function lessonList(lessons) {
   const rows = [];
@@ -87,7 +94,8 @@ function tiles(day, data) {
   const endNote = day.early_end ? `statt ${esc(day.planned_end)}` : plural(active.length, "Stunde", "Stunden");
   const changeTags = [...new Set(day.changes.map((c) => c.state))].map(stateTag).join(" ");
   const hwOpen = day.homework_due.filter((h) => !h.done);
-  const exam = day.exams_today[0] || data.next_exam;
+  // Die nächste Arbeit gesehen vom angezeigten Tag, nicht von heute: sonst steht dort "vor 2 Tagen"
+  const exam = day.exams_today[0] || day.exams_upcoming[0] || (data.next_exam && data.next_exam.date >= day.date ? data.next_exam : null);
 
   return `
     <div class="bento">
@@ -174,7 +182,7 @@ function examsSection(day) {
       <span class="row-icon ${highlight ? "red" : ""}">${icon("exam")}</span>
       <div class="row-main">
         <div class="row-title">${esc(e.subject)} <span class="tag ${highlight ? "red" : ""}">${esc(e.type)}</span></div>
-        <div class="row-sub">${esc(shortDate(e.date))}${e.hour ? `, ${esc(e.hour)}. Stunde` : ""}${e.comment ? ` · ${esc(e.comment)}` : ""}</div>
+        <div class="row-sub">${esc(shortDate(e.date))}${e.hour ? `, ${esc(e.hour)}. Stunde` : e.manual && e.start ? `, ${esc(e.start)}–${esc(e.end)} Uhr` : ""}${e.comment ? ` · ${esc(e.comment)}` : ""}</div>
       </div>
       <span class="row-aside">${esc(inDays(e.date, day.date))}</span>
     </a></li>`;
@@ -236,6 +244,15 @@ function statusNotice(status) {
   return `<div class="notice red reveal" style="margin-bottom:18px">${icon("warning-circle")}<p><strong>Letzter Abruf fehlgeschlagen.</strong> ${esc(status.last_error)}</p></div>`;
 }
 
+function leaveNotice(day) {
+  const leaves = day.leaves || [];
+  if (!leaves.length || (!day.school_day && !day.lessons.length)) return "";
+  return leaves.map((l) => {
+    const span = l.hours || (l.from === l.to ? "ganztägig" : `bis ${shortDate(l.to)}`);
+    return `<div class="notice blue reveal" style="margin-bottom:12px">${icon("door-open")}<p><strong>Beurlaubt</strong> · ${esc(span)}${l.reason ? ` · ${esc(l.reason)}` : ""}</p></div>`;
+  }).join("");
+}
+
 function updateNow(main, dayIso) {
   const now = new Date();
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -244,7 +261,7 @@ function updateNow(main, dayIso) {
     const start = minutesOf(el.dataset.start);
     const end = minutesOf(el.dataset.end);
     const isNow = dayIso === todayIso && start !== null && end !== null && minutes >= start && minutes < end
-      && !el.classList.contains("is-cancelled") && !el.classList.contains("is-eva");
+      && !["is-cancelled", "is-eva", "is-leave"].some((cls) => el.classList.contains(cls));
     el.classList.toggle("is-now", isNow);
     const bar = el.querySelector(".now-progress");
     if (!bar) return;
@@ -298,6 +315,7 @@ export async function render(main, params, ctx) {
       <p class="lede">${lede(day, data)}</p>
     </header>
     ${statusNotice(data.status)}
+    ${leaveNotice(day)}
     ${breakCard(day, data)}
     ${day.lessons.length ? tiles(day, data) : ""}
     ${day.lessons.length ? `<section class="section"><h2 class="section-title">Stunden <span class="aside">${esc(day.planned_start)}–${esc(day.planned_end)}</span></h2>${lessonList(day.lessons)}</section>` : ""}

@@ -7,6 +7,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from . import own
+
 
 def _escape(text: str) -> str:
     return (
@@ -59,7 +61,7 @@ def _event(uid: str, summary: str, start: str, end: str | None = None, all_day_e
 
 
 def build(lessons: list[dict[str, Any]], exams: list[dict[str, Any]], events: list[dict[str, Any]],
-          tz: ZoneInfo, include_lessons: bool = True) -> str:
+          tz: ZoneInfo, include_lessons: bool = True, leaves: list[dict[str, Any]] | None = None) -> str:
     out = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -75,6 +77,8 @@ def build(lessons: list[dict[str, Any]], exams: list[dict[str, Any]], events: li
         for l in lessons:
             if not l["start"] or not l["end"]:
                 continue
+            if l["state"] in ("exam", "leave"):
+                continue  # Klausuren kommen aus der Klausurliste, beurlaubte Stunden aus der Beurlaubung
             prefix = {"cancelled": "Entfall: ", "eva": "EVA: ", "substitution": "Vertretung: ",
                       "room-change": "Raum: "}.get(l["state"], "")
             desc = []
@@ -97,6 +101,17 @@ def build(lessons: list[dict[str, Any]], exams: list[dict[str, Any]], events: li
                 description=" · ".join(desc),
                 status="CANCELLED" if l["state"] == "cancelled" else "",
             )
+    for leave in leaves or []:
+        summary = "Beurlaubt" + (f": {leave['reason']}" if leave.get("reason") else "")
+        uid = _uid("leave", str(leave["id"]))
+        window = own.leave_window(leave)
+        if window:
+            out += _event(uid, summary, _utc(leave["from"], window[0], tz), _utc(leave["from"], window[1], tz),
+                          description=own.leave_hours(leave))
+        else:
+            last = date.fromisoformat(leave["to"]) + timedelta(days=1)
+            out += _event(uid, summary, date.fromisoformat(leave["from"]).strftime("%Y%m%d"),
+                          all_day_end=last.strftime("%Y%m%d"))
     for e in exams:
         summary = f"{e['type']}: {e['subject']}"
         if e.get("start") and e.get("end"):

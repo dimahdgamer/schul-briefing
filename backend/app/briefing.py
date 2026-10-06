@@ -5,13 +5,13 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from . import fmt, normalize
+from . import fmt, normalize, own
 from .holidays import SchoolCalendar
 
 
 def _free(lesson: dict[str, Any]) -> bool:
-    """Entfall und EVA: Man muss für diese Stunde nicht in der Schule sein."""
-    return lesson["state"] in ("cancelled", "eva")
+    """Entfall, EVA und Beurlaubung: Man muss für diese Stunde nicht in der Schule sein."""
+    return lesson["state"] in ("cancelled", "eva", "leave")
 
 
 def _eva_entries(
@@ -47,9 +47,11 @@ def day_summary(
     events: list[dict[str, Any]],
     done_ids: set[str],
     calendar: SchoolCalendar,
+    leaves: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     iso = day.isoformat()
     day_lessons = [l for l in lessons if l["date"] == iso]
+    day_leaves = own.leaves_on(leaves, iso)
     active = [l for l in day_lessons if not _free(l)]
     planned_start = min((l["start"] for l in day_lessons if l["start"]), default="")
     planned_end = max((l["end"] for l in day_lessons if l["end"]), default="")
@@ -77,10 +79,13 @@ def day_summary(
         "late_start": bool(start and planned_start and start > planned_start),
         "early_end": bool(end and planned_end and end < planned_end),
         "first_lesson": first_active,
-        "all_cancelled": bool(day_lessons) and not active,  # nichts, wofür man hin muss (Entfall oder EVA)
+        "all_cancelled": bool(day_lessons) and not active,  # nichts, wofür man hin muss (Entfall, EVA, Beurlaubung)
         "has_eva": any(l["state"] == "eva" for l in day_lessons),
         "eva": _eva_entries(day_lessons, hw_due, done_ids),
-        "changes": [l for l in day_lessons if l["state"] != "regular"],
+        "leaves": day_leaves,
+        "full_leave": any(not l.get("hour_from") for l in day_leaves),  # ganzer Tag beurlaubt
+        # Klausur und Beurlaubung sind keine Änderungen des Plans
+        "changes": [l for l in day_lessons if l["state"] not in ("regular", "exam", "leave")],
         "homework_due": [dict(h, done=h["id"] in done_ids) for h in hw_due],
         "exams_today": [e for e in exams if e["date"] == iso],
         "exams_upcoming": upcoming_exams,
@@ -104,6 +109,12 @@ def _change_line(lesson: dict[str, Any]) -> str:
     if lesson["state"] == "extra":
         return f"{prefix}zusätzlich {lesson['subject']}"
     return f"{prefix}{lesson['subject']}"
+
+
+def _lesson_label(lesson: dict[str, Any]) -> str:
+    if lesson["state"] == "exam":
+        return f"{lesson.get('exam_type') or 'Klausur'} {lesson['subject']}"
+    return f"{lesson['hour']}. Std {lesson['subject']}" if lesson["hour"] else lesson["subject"]
 
 
 def _shorten(text: str, limit: int = 70) -> str:
@@ -135,14 +146,19 @@ def build_push(
     day = fmt.parse(summary["date"])
     prefix = fmt.relative_day(day, today)
     lines: list[str] = []
+    on_leave = summary["full_leave"] or any(l["state"] == "leave" for l in summary["lessons"])
 
-    if not summary["lessons"]:
+    if summary["full_leave"]:
+        title = f"{prefix}: Beurlaubt"
+    elif not summary["lessons"]:
         title = f"{prefix}: kein Unterricht eingetragen"
     elif summary["all_cancelled"]:
-        title = (
-            f"{prefix}: Kein Unterricht vor Ort (EVA)" if summary["has_eva"]
-            else f"{prefix}: Der gesamte Unterricht fällt aus"
-        )
+        if on_leave:
+            title = f"{prefix}: Beurlaubt"
+        elif summary["has_eva"]:
+            title = f"{prefix}: Kein Unterricht vor Ort (EVA)"
+        else:
+            title = f"{prefix}: Der gesamte Unterricht fällt aus"
     else:
         title = f"{prefix} {summary['start']}–{summary['end']} Uhr"
         n = len(summary["changes"])
@@ -150,10 +166,20 @@ def build_push(
             title += f" · {fmt.plural(n, 'Änderung', 'Änderungen')}"
 
     if summary["late_start"] and summary["first_lesson"]:
-        first = summary["first_lesson"]
-        lines.append(f"Später los: Beginn {summary['start']} ({first['hour']}. Std {first['subject']})")
+        lines.append(f"Später los: Beginn {summary['start']} ({_lesson_label(summary['first_lesson'])})")
     if summary["early_end"]:
         lines.append(f"Früher Schluss um {summary['end']}")
+
+    for leave in summary["leaves"]:
+        parts = []
+        if leave["hours"]:
+            parts.append(leave["hours"])
+        elif leave["to"] != summary["date"]:
+            parts.append(f"bis {fmt.short_date(leave['to'])}")
+        if leave.get("reason"):
+            parts.append(f"({leave['reason']})")
+        if parts:
+            lines.append("Beurlaubt " + " ".join(parts))
 
     change_lines = [_change_line(l) for l in summary["changes"] if l["state"] != "eva"]
     if len(change_lines) > 3:
@@ -165,7 +191,8 @@ def build_push(
     lines.extend(_eva_line(entry) for entry in summary["eva"])
 
     for exam in summary["exams_today"]:
-        lines.append(f"{exam['type']} {prefix.lower()}: {exam['subject']}")
+        when = f" ({exam['start']}–{exam['end']} Uhr)" if exam.get("start") and exam.get("end") else ""
+        lines.append(f"{exam['type']} {prefix.lower()}: {exam['subject']}{when}")
 
     eva_ids = {t["id"] for entry in summary["eva"] for t in entry["tasks"]}
     open_hw = [h for h in summary["homework_due"] if not h.get("done") and h["id"] not in eva_ids]

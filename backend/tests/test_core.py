@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app import bell, briefing, diff, ical, normalize
+from app import bell, briefing, diff, ical, normalize, own
 from app.db import Database
 from app.holidays import Period, SchoolCalendar
 from app.schulmanager import salted_hash
@@ -424,3 +424,131 @@ def test_ical_marks_eva():
     body = ical.build(normalize.lessons([REAL_EVA]), [], [], ZoneInfo("Europe/Berlin"))
     assert "SUMMARY:EVA: Erdkunde" in body
     assert "LOCATION" not in body
+
+
+# ── Eigene Klausuren und Beurlaubungen ───────────────────────────────
+
+TUESDAY = date(2026, 10, 6)
+
+
+def day_plan(day: str = "2026-10-06", hours: int = 6):
+    """Je Stunde ein Fach, mit Zeiten aus dem Stundenraster."""
+    subjects = ["Mathematik", "Deutsch", "Geschichte", "Physik", "Erdkunde", "Musik"]
+    return normalize.lessons([raw_lesson(day, str(h), subjects[h - 1]) for h in range(1, hours + 1)])
+
+
+def exam_entry(**extra):
+    base = {"id": "own-1", "subject": "Mathematik", "date": "2026-10-06", "start": "08:00", "end": "10:15",
+            "type": "Klausur", "comment": ""}
+    return own.exam_item(dict(base, **extra))
+
+
+def leave_entry(**extra):
+    base = {"id": "own-9", "from": "2026-10-06", "to": "2026-10-06", "hour_from": "", "hour_to": "", "reason": ""}
+    return dict(base, **extra)
+
+
+def test_exam_replaces_overlapping_lessons(calendar):
+    exam = exam_entry()
+    lessons = own.overlay(day_plan(hours=4), [exam], [])
+    # 1., 2. und 3. Stunde liegen (teilweise) im Zeitfenster, nur die 4. bleibt
+    assert [(l["state"], l["hour"]) for l in lessons] == [("exam", ""), ("regular", "4")]
+    summary = briefing.day_summary(TUESDAY, lessons, [], [exam], [], set(), calendar)
+    assert (summary["start"], summary["end"]) == ("08:00", "11:15")
+    assert summary["changes"] == [] and not summary["late_start"]
+    push = briefing.build_push("morning", summary, TUESDAY, 0, 0)
+    assert push["title"] == "Heute 08:00–11:15 Uhr"
+    assert "Klausur heute: Mathematik (08:00–10:15 Uhr)" in push["body"]
+
+
+def test_exam_on_other_day_changes_nothing():
+    lessons = day_plan(hours=3)
+    assert own.overlay(lessons, [exam_entry(date="2026-10-07")], [])[:3] == lessons[:3]
+
+
+def test_schulmanager_exams_do_not_hide_lessons():
+    """Nur selbst eingetragene Klausuren legen sich über den Plan, Arbeiten aus Schulmanager nicht."""
+    lessons = day_plan(hours=3)
+    from_school = {"id": "7", "subject": "Mathematik", "date": "2026-10-06", "start": "08:00", "end": "10:15",
+                   "hour": "1/2", "type": "Klausur", "comment": ""}
+    assert own.overlay(lessons, [from_school], []) == lessons
+
+
+def test_bell_hour_at():
+    assert bell.hour_at("08:00") == "1"  # mitten in der 1. Stunde
+    assert bell.hour_at("09:30") == "3"  # in der Pause: die folgende Stunde
+    assert bell.hour_at("15:50") == "10"
+    assert bell.hour_at("23:00") == "" and bell.hour_at("") == ""
+
+
+def test_leave_by_hours(calendar):
+    lessons = day_plan()
+    lessons[3] = dict(lessons[3], state="cancelled")  # 4. Stunde fällt ohnehin aus
+    leave = leave_entry(hour_from="3", hour_to="4", reason="Arzttermin")
+    shown = own.overlay(lessons, [], [leave])
+    assert [l["state"] for l in shown] == ["regular", "regular", "leave", "cancelled", "regular", "regular"]
+    summary = briefing.day_summary(TUESDAY, shown, [], [], [], set(), calendar, [leave])
+    assert summary["leaves"][0]["hours"] == "3.–4. Std" and not summary["full_leave"]
+    assert summary["changes"] == [{**lessons[3]}]  # nur der Entfall, die Beurlaubung ist keine Planänderung
+    push = briefing.build_push("morning", summary, TUESDAY, 0, 0)
+    assert "Beurlaubt 3.–4. Std (Arzttermin)" in push["body"]
+
+
+def test_full_day_leave(calendar):
+    leave = leave_entry(to="2026-10-08", reason="Praktikum")
+    lessons = own.overlay(day_plan("2026-10-07", 3), [], [leave])
+    assert {l["state"] for l in lessons} == {"leave"}
+    summary = briefing.day_summary(date(2026, 10, 7), lessons, [], [], [], set(), calendar, [leave])
+    assert summary["full_leave"] and summary["all_cancelled"] and summary["start"] == ""
+    push = briefing.build_push("morning", summary, TUESDAY, 0, 0)
+    assert push["title"] == "Morgen: Beurlaubt"
+    assert "Beurlaubt bis Do 08.10. (Praktikum)" in push["body"]
+
+
+def test_full_day_leave_without_timetable(calendar):
+    """Auch ohne Stundenplan-Daten für den Tag (weiter als vier Wochen voraus) ist die Beurlaubung da."""
+    leave = leave_entry(**{"from": "2026-12-01", "to": "2026-12-01"})
+    summary = briefing.day_summary(date(2026, 12, 1), [], [], [], [], set(), calendar, [leave])
+    assert summary["full_leave"] and summary["lessons"] == []
+    assert briefing.build_push("morning", summary, TUESDAY, 0, 0)["title"] == "Di 01.12.: Beurlaubt"
+
+
+def test_exam_input_validation():
+    ok = own.clean_exam({"subject": "  Mathematik ", "date": "2026-10-12", "start": "8:05", "end": "10:20"})
+    assert ok == {"subject": "Mathematik", "date": "2026-10-12", "start": "08:05", "end": "10:20",
+                  "type": "Klausur", "comment": ""}
+    base = {"subject": "Mathematik", "date": "2026-10-12", "start": "08:00", "end": "10:00"}
+    for bad in (dict(base, subject=""), dict(base, date="12.10."), dict(base, start="25:00"),
+                dict(base, end="08:00"), dict(base, end="07:00"), dict(base, comment="x" * 201)):
+        with pytest.raises(ValueError):
+            own.clean_exam(bad)
+
+
+def test_leave_input_validation():
+    assert own.clean_leave({"from": "2026-10-12", "to": "2026-10-14"}) == {
+        "from": "2026-10-12", "to": "2026-10-14", "hour_from": "", "hour_to": "", "reason": ""}
+    single = own.clean_leave({"from": "2026-10-12", "hour_from": "3"})
+    assert single["to"] == "2026-10-12" and single["hour_to"] == "3"
+    for bad in (
+        {"from": "2026-10-12", "to": "2026-10-14", "hour_from": "3"},  # Stunden nur an einem Tag
+        {"from": "2026-10-12", "hour_from": "5", "hour_to": "3"},
+        {"from": "2026-10-12", "hour_from": "12"},
+        {"from": "2026-10-14", "to": "2026-10-12"},
+        {"from": "2026-10-12", "to": "2027-10-12"},
+        {"to": "2026-10-12"},
+    ):
+        with pytest.raises(ValueError):
+            own.clean_leave(bad)
+
+
+def test_ical_has_leave_and_exam_once():
+    exam = exam_entry()
+    leave = leave_entry(hour_from="5", hour_to="6", reason="Arzttermin")
+    long_leave = leave_entry(id="own-8", to="2026-10-08")
+    lessons = own.overlay(day_plan(), [exam], [leave])
+    body = ical.build(lessons, [exam], [], ZoneInfo("Europe/Berlin"), True, [leave, long_leave])
+    assert "SUMMARY:Klausur: Mathematik" in body and "DTSTART:20261006T060000Z" in body  # 08:00 MESZ
+    assert "SUMMARY:Mathematik\r\n" not in body  # die Klausur steht nur einmal im Kalender
+    assert "SUMMARY:Beurlaubt: Arzttermin" in body and "DTSTART:20261006T093500Z" in body  # 5. Std 11:35
+    assert "SUMMARY:Erdkunde" not in body and "SUMMARY:Musik" not in body  # beurlaubte Stunden fehlen
+    assert "DTSTART;VALUE=DATE:20261006" in body and "DTEND;VALUE=DATE:20261009" in body

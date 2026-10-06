@@ -157,3 +157,120 @@ def test_settings_reject_bad_briefing_values(client):
     http.post("/api/login", json={"password": "geheim"})
     assert http.put("/api/settings", json={"briefing_mode": "egal"}).status_code == 400
     assert http.put("/api/settings", json={"briefing_by_hour": {"1": "26:00"}}).status_code == 400
+
+
+# ── Eigene Klausuren und Beurlaubungen ───────────────────────────────
+
+EXAM = {"subject": "Mathematik", "date": "2026-10-12", "start": "08:00", "end": "10:15"}
+
+
+def test_own_entries_need_login(client):
+    http, _ = client
+    assert http.get("/api/own").status_code == 401
+    assert http.post("/api/own/exams", json=EXAM).status_code == 401
+    assert http.delete("/api/own/exams/own-1").status_code == 401
+
+
+def test_own_exam_crud_and_shows_up_as_exam(client):
+    http, _ = client
+    http.post("/api/login", json={"password": "geheim"})
+    created = http.post("/api/own/exams", json=EXAM)
+    assert created.status_code == 200
+    item = created.json()
+    assert item["id"].startswith("own-") and item["type"] == "Klausur"
+
+    listed = {e["id"]: e for e in http.get("/api/exams").json()["items"]}
+    assert listed[item["id"]]["manual"] is True and listed[item["id"]]["end"] == "10:15"
+    assert http.get("/api/own").json()["exams"] == [item]
+
+    changed = http.put(f"/api/own/exams/{item['id']}", json=dict(EXAM, end="10:30", type="Test")).json()
+    assert changed["end"] == "10:30" and changed["id"] == item["id"] and changed["type"] == "Test"
+    assert http.put("/api/own/exams/gibtsnicht", json=EXAM).status_code == 404
+    assert http.put(f"/api/own/exams/{item['id']}", json=dict(EXAM, end="07:00")).status_code == 400
+
+    assert http.delete(f"/api/own/exams/{item['id']}").json() == {"ok": True}
+    assert http.delete(f"/api/own/exams/{item['id']}").status_code == 404
+    assert http.get("/api/own").json()["exams"] == []
+
+
+def test_own_entries_reject_bad_input(client):
+    http, _ = client
+    http.post("/api/login", json={"password": "geheim"})
+    assert http.post("/api/own/exams", json=dict(EXAM, subject="")).status_code == 400
+    assert http.post("/api/own/leaves", json={"from": "2026-10-12", "to": "2026-10-14", "hour_from": "3"}).status_code == 400
+    assert http.post("/api/own/unbekannt", json={}).status_code == 404
+    assert http.get("/api/own").json()["leaves"] == []
+
+
+def test_own_lists_offer_subjects_and_hours(client):
+    http, _ = client
+    http.post("/api/login", json={"password": "geheim"})
+    data = http.get("/api/own").json()
+    assert data["subjects"] and data["hours"][0] == {"hour": "1", "start": "07:55", "end": "08:40"}
+
+
+def test_leave_shows_in_overview_and_week(client):
+    http, _ = client
+    http.post("/api/login", json={"password": "geheim"})
+    leave = http.post("/api/own/leaves", json={"from": "2026-10-12", "to": "2026-10-14", "reason": "Praktikum"}).json()
+    day = http.get("/api/overview?date=2026-10-13").json()["day"]
+    assert day["full_leave"] and day["leaves"][0]["id"] == leave["id"] and day["leaves"][0]["reason"] == "Praktikum"
+    assert not http.get("/api/overview?date=2026-10-15").json()["day"]["full_leave"]
+    week = http.get("/api/week?start=2026-10-12").json()
+    assert [bool(d["leaves"]) for d in week["days"]] == [True, True, True, False, False]
+
+
+def test_exam_moves_briefing_to_exam_hour(client):
+    _, main = client
+    service = main.service
+    day = date(2026, 10, 6)
+    service.db.save_snapshot("lessons", [
+        {"date": "2026-10-06", "hour": "3", "state": "regular", "start": "09:45", "end": "10:30", "subject": "Deutsch"},
+    ])
+    assert service.briefing_time_for(day)["time"] == "08:00"  # 3. Stunde
+    service.db.set("own_exams", [{"id": "own-1", "subject": "Mathematik", "date": "2026-10-06", "start": "08:00",
+                                  "end": "10:15", "type": "Klausur", "comment": ""}])
+    # Die Klausur ab 08:00 liegt in der 1. Stunde, das Briefing kommt entsprechend früh
+    assert service.briefing_time_for(day)["time"] == "07:00"
+
+
+def test_no_morning_push_when_fully_on_leave(client):
+    from datetime import datetime
+
+    _, main = client
+    service, scheduler = main.service, main.scheduler
+    day = date(2026, 10, 13)  # Dienstag
+    # Erste Stunde = 1., Briefing um 07:00, hier fällig um 07:05
+    service.db.save_snapshot("lessons", [
+        {"id": "a", "date": "2026-10-13", "hour": "1", "state": "regular", "start": "07:55", "end": "08:40",
+         "subject": "Mathematik"},
+    ])
+    assert service.briefing_time_for(day)["time"] == "07:00"
+    now = datetime(2026, 10, 13, 7, 5, tzinfo=main.cfg.tz)
+
+    service.db.set("own_leaves", [{"id": "own-9", "from": "2026-10-13", "to": "2026-10-13", "hour_from": "",
+                                   "hour_to": "", "reason": ""}])
+    assert service.briefing_skipped(day)
+    asyncio.run(scheduler.tick(now))
+    assert service.db.get("sent_briefing") is None  # beurlaubt: kein Morgen-Push
+
+    service.db.set("own_leaves", [])
+    assert not service.briefing_skipped(day)
+    asyncio.run(scheduler.tick(now))
+    assert service.db.get("sent_briefing") == "2026-10-13"  # ohne Beurlaubung kommt er
+
+
+def test_briefing_skipped_only_when_everything_is_free(client):
+    _, main = client
+    service = main.service
+    day = date(2026, 10, 13)
+    service.db.save_snapshot("lessons", [
+        {"id": f"{h}", "date": "2026-10-13", "hour": h, "state": "regular", "start": s, "end": e, "subject": "Mathematik"}
+        for h, (s, e) in (("1", ("07:55", "08:40")), ("2", ("08:40", "09:25")), ("3", ("09:45", "10:30")))
+    ])
+    set_leave = lambda **kw: service.db.set("own_leaves", [dict(
+        {"id": "own-9", "from": "2026-10-13", "to": "2026-10-13", "hour_from": "", "hour_to": "", "reason": ""}, **kw)])
+    set_leave(hour_from="1", hour_to="2")
+    assert not service.briefing_skipped(day)  # die 3. Stunde bleibt
+    set_leave(hour_from="1", hour_to="3")
+    assert service.briefing_skipped(day)  # alle Stunden beurlaubt

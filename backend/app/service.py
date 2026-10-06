@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from . import bell, briefing, fmt
+from . import bell, briefing, fmt, own
 from .config import Config
 from .db import Database
 from .holidays import SchoolCalendar
@@ -36,17 +36,39 @@ class AppService:
     def snap(self, module: str) -> list[dict[str, Any]]:
         return self.db.snapshot(module) or []
 
+    # ── Eigene Einträge: Klausuren und Beurlaubungen ─────────────────
+
+    def own(self, kind: str) -> list[dict[str, Any]]:
+        return self.db.get(f"own_{kind}", []) or []
+
+    def exams(self) -> list[dict[str, Any]]:
+        """Klassenarbeiten aus Schulmanager plus selbst eingetragene Klausuren."""
+        mine = [own.exam_item(e) for e in self.own("exams")]
+        return sorted(self.snap("exams") + mine, key=lambda e: (e["date"], e.get("start") or ""))
+
+    def with_own(self, lessons: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Stundenplan mit Klausuren und Beurlaubungen darüber."""
+        return own.overlay(lessons, [own.exam_item(e) for e in self.own("exams")], self.own("leaves"))
+
+    def lessons(self) -> list[dict[str, Any]]:
+        return self.with_own(self.snap("lessons"))
+
+    def subjects(self) -> list[str]:
+        """Fächer aus dem Stundenplan, als Vorschläge für die Eingabe."""
+        return sorted({l["subject"] for l in self.snap("lessons") if l.get("subject") and l["state"] != "event"})
+
     # ── Tagesansicht ─────────────────────────────────────────────────
 
     def day(self, day: date) -> dict[str, Any]:
         summary = briefing.day_summary(
             day,
-            self.snap("lessons"),
+            self.lessons(),
             self.snap("homework"),
-            self.snap("exams"),
+            self.exams(),
             self.snap("calendar"),
             self.db.homework_done_ids(),
             self.calendar,
+            self.own("leaves"),
         )
         start, end = self.sync.lesson_window(self.today())
         summary["in_window"] = start <= day <= end
@@ -73,7 +95,7 @@ class AppService:
         today = self.today()
         target = day or self.default_day()
         letters, messages = self.unread_counts()
-        exams = [e for e in self.snap("exams") if e["date"] >= today.isoformat()]
+        exams = [e for e in self.exams() if e["date"] >= today.isoformat()]
         done = self.db.homework_done_ids()
         open_hw = [h for h in self.snap("homework") if h["due"] >= today.isoformat() and h["id"] not in done]
         return {
@@ -106,13 +128,14 @@ class AppService:
         start, end = self.sync.lesson_window(self.today())
         source = "snapshot"
         if start <= monday and friday <= end:
-            lessons = [l for l in self.snap("lessons") if monday.isoformat() <= l["date"] <= friday.isoformat()]
+            lessons = self.lessons()
         else:
-            lessons = await self.sync.lessons_for(monday, friday)
+            lessons = self.with_own(await self.sync.lessons_for(monday, friday))
             source = "live"
         days = []
         events = self.snap("calendar")
-        exams = self.snap("exams")
+        exams = self.exams()
+        leaves = self.own("leaves")
         for offset in range(5):
             d = monday + timedelta(days=offset)
             iso = d.isoformat()
@@ -122,7 +145,9 @@ class AppService:
                 "label": fmt.long_date(d),
                 "short": fmt.short_date(d),
                 "holiday": holiday.name if holiday else None,
-                "lessons": [l for l in lessons if l["date"] == iso],
+                # Die Klausur steht als eigene Zeile bei den Arbeiten, nicht noch einmal bei den Stunden
+                "lessons": [l for l in lessons if l["date"] == iso and l["state"] != "exam"],
+                "leaves": own.leaves_on(leaves, iso),
                 "exams": [e for e in exams if e["date"] == iso],
                 "events": [e for e in events if not e["is_holiday"] and e["start"][:10] <= iso <= (e["end"] or e["start"])[:10]],
             })
@@ -140,7 +165,11 @@ class AppService:
         if settings["briefing_mode"] != "auto":
             return fixed
         iso = day.isoformat()
-        hours = [bell.first_number(l["hour"]) for l in self.snap("lessons") if l["date"] == iso]
+        # Eine eigene Klausur hat keine Stundennummer: die Stunde kommt aus ihrer Uhrzeit
+        hours = [
+            bell.first_number(l["hour"]) or bell.hour_at(l.get("start") or "")
+            for l in self.lessons() if l["date"] == iso
+        ]
         hours = sorted({int(h) for h in hours if h})
         if not hours:
             return {**fixed, "mode": "auto-fallback"}
@@ -164,6 +193,13 @@ class AppService:
         return {"kind": kind, "target": target.isoformat(), "push": push, "summary": summary,
                 "scheduled": self.briefing_time_for(target) if kind == "morning" else None}
 
+    def briefing_skipped(self, day: date) -> bool:
+        """An Tagen, an denen man komplett beurlaubt ist, gibt es kein Morgen-Briefing."""
+        summary = self.day(day)
+        return summary["full_leave"] or (
+            summary["all_cancelled"] and any(l["state"] == "leave" for l in summary["lessons"])
+        )
+
     def next_briefing(self) -> dict[str, Any]:
         """Wann das nächste Morgen-Briefing kommt (für die Anzeige in den Einstellungen)."""
         now = self.now()
@@ -173,6 +209,10 @@ class AppService:
             planned = self.briefing_time_for(today)
             if self.db.get("sent_briefing") == today.isoformat() or now.strftime("%H:%M") > planned["time"]:
                 day = self.calendar.next_school_day(today)
+        for _ in range(60):  # beurlaubte Tage überspringen
+            if not self.briefing_skipped(day):
+                break
+            day = self.calendar.next_school_day(day)
         return {"date": day.isoformat(), **self.briefing_time_for(day)}
 
     async def send_briefing(self, kind: str, target: date | None = None) -> dict[str, Any]:
@@ -187,7 +227,8 @@ class AppService:
         today = self.today()
         reminded: list[str] = self.db.get("reminded", []) or []
         sent = 0
-        for exam in self.snap("exams"):
+        exams = self.exams()
+        for exam in exams:
             days = (fmt.parse(exam["date"]) - today).days
             if days not in settings["reminder_days"]:
                 continue
@@ -200,13 +241,13 @@ class AppService:
             if exam.get("hour"):
                 details.append(f"{exam['hour']}. Stunde")
             elif exam.get("start"):
-                details.append(f"{exam['start']} Uhr")
+                details.append(f"{exam['start']}–{exam['end']} Uhr" if exam.get("end") else f"{exam['start']} Uhr")
             body = ", ".join(details) + (f"\n{exam['comment']}" if exam.get("comment") else "")
             self.db.add_event("reminder", "exam", title, body, "/#/aufgaben?tab=klausuren", exam["date"])
             await self.pusher.send(title, body, "/#/aufgaben?tab=klausuren", tag=f"reminder-{exam['id']}")
             sent += 1
         # Erinnerungen an vergangene Klausuren vergessen
-        valid = {e["id"] for e in self.snap("exams") if e["date"] >= today.isoformat()}
+        valid = {e["id"] for e in exams if e["date"] >= today.isoformat()}
         self.db.set("reminded", [k for k in reminded if k.split(":")[0] in valid])
         return sent
 

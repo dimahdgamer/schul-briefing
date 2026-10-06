@@ -761,6 +761,21 @@ button.card:hover {
   background: var(--violet);
   opacity: 0.6;
 }
+.lesson.is-exam::before {
+  background: var(--red);
+  opacity: 0.7;
+}
+.lesson.is-exam .lesson-hour {
+  color: var(--red);
+}
+.lesson.is-leave::before {
+  background: var(--blue);
+  opacity: 0.6;
+}
+.lesson.is-leave .lesson-subject,
+.lesson.is-leave .lesson-hour {
+  color: var(--faint);
+}
 .lesson.is-room-change::before,
 .lesson.is-extra::before {
   background: var(--blue);
@@ -1005,6 +1020,15 @@ a.row:hover {
   font-weight: 550;
   text-decoration: none;
   cursor: pointer;
+}
+.segmented.wide {
+  display: flex;
+  width: 100%;
+}
+.segmented.wide a {
+  flex: 1;
+  padding: 8px 4px;
+  text-align: center;
 }
 .segmented [aria-pressed="true"],
 .segmented [aria-current="page"] {
@@ -1341,6 +1365,12 @@ kbd {
 .mini li.is-eva .s {
   color: var(--muted);
 }
+.mini li.is-leave {
+  background: var(--blue-bg);
+}
+.mini li.is-leave .s {
+  color: var(--muted);
+}
 .mini li.is-room-change,
 .mini li.is-extra {
   background: var(--blue-bg);
@@ -1649,4 +1679,113 @@ kbd {
 
 .main:focus {
   outline: none;
+}
+
+/* ── Eingabefenster ─────────────────────────────────────────────── */
+
+.sheet {
+  width: min(520px, 100%);
+  max-width: 100%;
+  max-height: 92vh;
+  margin: auto auto 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px 18px 0 0;
+  background: var(--surface);
+  color: var(--text);
+  overflow: auto;
+}
+.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+.sheet:focus {
+  outline: none;
+}
+.sheet[open] {
+  animation: sheet-in 280ms var(--ease);
+}
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+@media (min-width: 640px) {
+  .sheet {
+    margin: auto;
+    border-radius: var(--radius);
+  }
+}
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px 18px calc(18px + var(--safe-bottom));
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sheet-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+.sheet-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 12px;
+}
+.sheet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  grid-column: span 2;
+  min-width: 0;
+}
+.sheet-field.half {
+  grid-column: span 1;
+}
+.sheet-field[hidden] {
+  display: none;
+}
+.sheet .sheet-field .input {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+.sheet .sheet-field input[type="time"].input {
+  font-family: var(--font-mono);
+}
+.sheet-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--red-bg);
+  color: var(--red);
+  font-size: 14px;
+}
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sheet-actions .btn.primary {
+  min-width: 140px;
+}
+
+/* ── Eigene Einträge in den Listen ──────────────────────────────── */
+
+.own-tag {
+  color: var(--faint);
+  font-size: 12px;
+}
+.exam-actions {
+  margin-top: 8px;
 }
