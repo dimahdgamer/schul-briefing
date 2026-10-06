@@ -37,11 +37,23 @@ LOGIN_BACKOFF_SECONDS = 6 * 3600
 
 
 class SyncService:
-    def __init__(self, cfg: Config, db: Database, calendar: SchoolCalendar, pusher: Pusher) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        db: Database,
+        calendar: SchoolCalendar,
+        pusher: Pusher,
+        modules: tuple[str, ...] = MODULES,
+        keep_raw: bool = True,
+    ) -> None:
         self.cfg = cfg
         self.db = db
         self.calendar = calendar
         self.pusher = pusher
+        # Welche Module abgerufen werden. Für Freunde nur das, was der Kalender braucht
+        self.modules = modules
+        # Rohantworten zur Fehlersuche auf die Platte schreiben (bei Freunden nicht)
+        self.keep_raw = keep_raw
         self._lock = asyncio.Lock()
         self._lesson_cache: dict[tuple[str, str], tuple[float, list[dict[str, Any]]]] = {}
         if cfg.demo:
@@ -116,7 +128,7 @@ class SyncService:
                                                                      "end": (today + timedelta(days=90)).isoformat(),
                                                                      "includeHolidays": True}),
         }
-        names = list(calls)
+        names = [name for name in calls if name in self.modules]
         results = await self.client.calls([calls[n] for n in names])
         out = {}
         for name, result in zip(names, results):
@@ -174,7 +186,7 @@ class SyncService:
             self.db.sync_finished(sync_id, False, error=str(exc))
             self._set_status(error=str(exc))
             await self._notify_failure(f"Schulmanager-Login fehlgeschlagen: {exc}")
-            return {"ok": False, "error": str(exc), "changes": 0}
+            return {"ok": False, "error": str(exc), "changes": 0, "auth": True}
         except Exception as exc:
             log.exception("Abruf fehlgeschlagen")
             self.db.sync_finished(sync_id, False, error=str(exc))
@@ -191,7 +203,7 @@ class SyncService:
 
         fresh_start = self.db.get("snapshot_version") != SNAPSHOT_VERSION
         normalized: dict[str, Any] = {}
-        for module in MODULES:
+        for module in self.modules:
             ok, data, status = raw.get(module, (False, None, 0))
             if status in DISABLED_STATUS:
                 # Modul ist für dieses Konto nicht freigeschaltet (z. B. Noten): kein Fehler
@@ -261,6 +273,8 @@ class SyncService:
         return []
 
     def _write_raw(self, module: str, data: Any) -> None:
+        if not self.keep_raw:
+            return
         try:
             path = self.cfg.data_dir / "raw" / f"{module}.json"
             path.write_text(json.dumps(data, ensure_ascii=False, indent=1, default=str), encoding="utf-8")

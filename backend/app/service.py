@@ -9,6 +9,7 @@ from typing import Any
 from . import bell, briefing, fmt, own
 from .config import Config
 from .db import Database
+from .friends import Friends
 from .holidays import SchoolCalendar
 from .push import Pusher
 from .sync import SyncService
@@ -23,6 +24,7 @@ class AppService:
         self.calendar = SchoolCalendar(self.db, cfg.subdivision)
         self.pusher = Pusher(self.db, cfg.data_dir, cfg.vapid_subject)
         self.sync = SyncService(cfg, self.db, self.calendar, self.pusher)
+        self.friends = Friends(cfg, self.db, self.pusher)
         cal_events = self.db.snapshot("calendar")
         if cal_events:
             self.calendar.set_calendar_holidays(cal_events)

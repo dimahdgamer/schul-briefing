@@ -24,6 +24,7 @@ ein Briefing. Läuft im Docker-Container auf dem Raspberry Pi unter
 | **Aufgaben** | Hausaufgaben nach Fälligkeit (nächste Stunde im jeweiligen Fach) mit Abhaken (nur lokal), Klassenarbeiten mit Countdown. |
 | **Eigene Klausuren** | Klausuren, die nicht im Schulmanager stehen, trägt man in Aufgaben → Klausuren selbst ein (Fach, Datum, von–bis, Art, Notiz). In dieser Zeit entfällt der übrige Unterricht, die Klausur steht als eigene Zeile im Tag. Beginn, Schluss und die Briefing-Uhrzeit richten sich nach ihr. Erinnerungen, Briefing, Woche und Kalender-Abo kennen sie wie jede andere Arbeit. Die Einträge liegen in der App-Datenbank (`data/`) und werden vom Schulmanager-Abruf nie überschrieben. Trägt die Schule dieselbe Klausur später selbst ein, erscheint sie doppelt, dann den eigenen Eintrag löschen. |
 | **Beurlaubung** | In Aufgaben → Beurlaubung trägt man ein, wann man von der Schule freigestellt ist: ganze Tage von–bis oder einzelne Stunden an einem Tag („3.–6. Stunde“), dazu ein optionaler Grund. Beurlaubte Stunden zählen wie Entfall. An komplett beurlaubten Tagen kommt kein Morgen-Briefing. |
+| **Freunde** | Freunde an derselben Schule bekommen ihren Stundenplan als Kalender-Link. Einstellungen → Freunde → „Freund einladen“ erzeugt einen Einladungslink (einmal verwendbar, 7 Tage gültig, höchstens 5 Fehlversuche). Der Freund öffnet ihn, gibt sein Schulmanager-Login selbst ein und bekommt Link und Anleitung. Auf seiner Seite (`/freund/<geheim>`) kann er den Link erneuern, sein Login ändern und alles löschen. Du siehst nur Name, Status und letzten Abruf. Details unter „Freunde und ihre Daten“. |
 | **EVA** | Eigenverantwortliches Arbeiten führt Schulmanager als Vertretung mit Raum „EVA“. Die App erkennt es daran und behandelt es wie Entfall (kein Weg zur Schule: Beginn, Schluss und Freistunden werden ohne EVA-Stunden berechnet). Heute und Briefing zeigen pro EVA-Stunde die Aufgaben, die in der letzten Stunde des Fachs oder am EVA-Tag selbst eingestellt wurden, oder „noch keine Aufgaben eingestellt“. Ältere Aufgaben gelten nicht als fällig. |
 | **Post** | Elternbriefe und Nachrichten, Antippen öffnet Schulmanager. |
 | **Verlauf** | Jede erkannte Änderung mit Zeitstempel. |
@@ -301,6 +302,29 @@ Wochenende und in den Ferien stündlich. Jeder Abruf ist **ein** HTTP-Request, a
 Module sind darin gebündelt. Nach einem fehlgeschlagenen Login pausiert die App
 6 Stunden, damit das Konto nicht gesperrt wird, und meldet das per Push.
 
+Freunde werden gestaffelt abgerufen, höchstens einer pro Minute: an Schultagen etwa
+stündlich, am Wochenende und in den Ferien alle vier Stunden. Stimmt das Passwort eines
+Freundes nicht mehr, hört die App für ihn auf zu probieren (sonst sperrt Schulmanager das
+Konto), du bekommst einen Push, und der Freund sieht auf seiner Seite „Login erneuern“.
+
+## Freunde und ihre Daten
+
+- **Getrennt:** Jeder Freund hat eigene Daten unter `data/accounts/<id>/` und einen eigenen
+  Abruf. Dein eigenes Konto und die App bleiben davon unberührt.
+- **Nur der Kalender:** Abgerufen werden Stundenplan, Klassenarbeiten und Schultermine.
+  Nachrichten, Elternbriefe, Hausaufgaben und Noten werden bei Freunden nie angefragt.
+  Rohantworten werden nicht gespeichert, Freunde bekommen keine eigenen Meldungen.
+- **Passwort:** Es liegt verschlüsselt (Fernet) in deiner Datenbank, der Schlüssel in
+  `data/accounts.key`. Das schützt, wenn jemand nur die Datenbank-Datei bekommt. Wer vollen
+  Zugriff auf den Pi hat, kann die Zugangsdaten trotzdem lesen. Geht `accounts.key` verloren,
+  müssen die Freunde ihr Login auf ihrer Seite neu eingeben. Sichere die Datei zusammen mit `data/`.
+- **Zustimmung:** Die Einladungsseite sagt klar, was gespeichert und abgerufen wird und dass der
+  Betreiber es technisch lesen könnte. Der Freund muss es bestätigen.
+- **Löschen:** Der Freund kann auf seiner Seite alles löschen, du kannst ihn in den
+  Einstellungen entfernen. Beides löscht Passwort, Datenbank und Kalender-Link.
+- **Grenzen:** Gleiche Schule (die Stundenzeiten stehen fest in `bell.py`) und kein Zwei-Faktor-Login.
+  Höchstens 10 Freunde einschließlich offener Einladungen.
+
 ## Fehlersuche
 
 | Problem | Lösung |
@@ -318,5 +342,9 @@ Module sind darin gebündelt. Nach einem fehlgeschlagenen Login pausiert die App
 - Das Dashboard ist durch `APP_PASSWORD` geschützt, mit Sperre nach 5 Fehlversuchen
   und einem Session-Cookie, das 180 Tage gültig ist.
 - Der Kalender-Link enthält ein geheimes Token und lässt sich jederzeit neu erzeugen.
+- Die Seiten für Freunde (`/einladung/…`, `/freund/…`) sind öffentlich erreichbar und nur durch
+  ihren geheimen Link geschützt. Fehlversuche werden je Besucher gezählt (Cloudflare-Adresse,
+  nicht das vom Besucher gesendete `X-Forwarded-For`) und führen nach 12 zu einer Sperre von 15 Minuten.
+  Die Seiten werden nicht zwischengespeichert und sind für Suchmaschinen gesperrt.
 - Der Container läuft als normaler Benutzer und ist nur über Cloudflare bzw. nginx erreichbar.
 - Das Token auf dem Pi darf nur Images lesen (`read:packages`).

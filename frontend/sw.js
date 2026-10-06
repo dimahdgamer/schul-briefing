@@ -63,7 +63,10 @@ async function networkFirst(request, fallbackKey) {
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
-  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/cal/")) return;
+  // Kalender-Abos und die Seiten der Freunde gehen am Service Worker vorbei: Sonst würde die Seite eines
+  // Freundes als Startseite zwischengespeichert, und geheime Links lägen im Cache.
+  const passthrough = ["/cal/", "/einladung/", "/freund/", "/api/invite/", "/api/friend/"];
+  if (request.method !== "GET" || url.origin !== self.location.origin || passthrough.some((p) => url.pathname.startsWith(p))) return;
 
   if (url.pathname.startsWith("/a/") || url.pathname.startsWith("/fonts/") || url.pathname.startsWith("/icons/")) {
     event.respondWith(cacheFirst(request, url));

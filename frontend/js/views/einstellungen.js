@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { currentSubscription, disablePush, enablePush, isIos, isStandalone, pushSupported } from "../push.js";
+import { openSheet } from "../sheet.js";
 import { errorState, esc, icon, longDate, skeleton, timeAgo, toast } from "../ui.js";
 import { LOADED_BUILD, hardReload } from "../version.js";
 
@@ -125,6 +126,49 @@ function briefingSection(s, status, bell) {
     </div>`;
 }
 
+const FRIEND_STATE = {
+  ok: '<span class="tag green">aktiv</span>',
+  waiting: '<span class="tag yellow">wartet</span>',
+  needs_login: '<span class="tag red">Login erneuern</span>',
+};
+
+function friendsSection(data) {
+  const share = typeof navigator.share === "function";
+  const friends = data.friends.map((f) => `
+    <div class="field">
+      <div>
+        <div class="field-label">${esc(f.label)} ${FRIEND_STATE[f.state] || ""}</div>
+        <div class="field-help">${f.state === "needs_login"
+          ? "Das Login stimmt nicht mehr, dein Freund muss es auf seiner Seite erneuern."
+          : `zuletzt aktualisiert ${esc(timeAgo(f.last_success))}${f.last_error ? ` · ${esc(f.last_error)}` : ""}`}</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn small" data-friend-sync="${esc(f.id)}" ${f.state === "needs_login" ? "disabled" : ""}>Abrufen</button>
+        <button class="btn small ghost" data-friend-remove="${esc(f.id)}" data-label="${esc(f.label)}">Entfernen</button>
+      </div>
+    </div>`).join("");
+  const invites = data.invites.map((i) => `
+    <div class="field">
+      <div>
+        <div class="field-label">${esc(i.label)} <span class="tag">Einladung offen</span></div>
+        <div class="field-help">gültig bis ${esc(longDate(i.expires.slice(0, 10)))}</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn small" data-invite-send="${esc(i.url)}" data-label="${esc(i.label)}">${share ? "Teilen" : "Link kopieren"}</button>
+        <button class="btn small ghost" data-invite-revoke="${esc(i.token)}">Widerrufen</button>
+      </div>
+    </div>`).join("");
+  return `
+    <div class="card">
+      <div class="field stack">
+        <div class="field-help">Freunde bekommen ihren Stundenplan als Kalender-Link. Du schickst ihnen einen Einladungslink, dort geben sie ihr Schulmanager-Login selbst ein. Du siehst es nie. Abgerufen werden nur Stundenplan, Klassenarbeiten und Schultermine, etwa einmal pro Stunde.</div>
+      </div>
+      ${friends}${invites}
+      ${!friends && !invites ? '<div class="field"><div class="field-help">Noch niemand eingeladen.</div></div>' : ""}
+      <div class="field"><button class="btn small" data-action="invite">+ Freund einladen</button></div>
+    </div>`;
+}
+
 function appSection(me) {
   const outdated = me.build && LOADED_BUILD && me.build !== LOADED_BUILD;
   const version = me.commit ? `Version <span class="mono">${esc(me.commit)}</span>` : "Version";
@@ -163,9 +207,9 @@ function statusSection(status) {
 
 export async function render(main, params, ctx) {
   main.innerHTML = skeleton(6);
-  let settings, status, ical, subscription, devices, bell, me;
+  let settings, status, ical, subscription, devices, bell, me, friends;
   try {
-    [settings, status, ical, subscription, devices, bell, me] = await Promise.all([
+    [settings, status, ical, subscription, devices, bell, me, friends] = await Promise.all([
       api("/settings"),
       api("/status"),
       api("/ical"),
@@ -173,6 +217,7 @@ export async function render(main, params, ctx) {
       api("/push/devices").then((d) => d.devices.length),
       api("/bell"),
       api("/me"),
+      api("/friends"),
     ]);
   } catch (error) {
     if (!ctx.isCurrent()) return;
@@ -256,6 +301,11 @@ export async function render(main, params, ctx) {
           </div>
         </div>
       </div>
+    </section>
+
+    <section class="section reveal" style="--i:6">
+      <h2 class="section-title">Freunde</h2>
+      ${friendsSection(friends)}
     </section>
 
     <section class="section reveal" style="--i:7">
@@ -423,6 +473,69 @@ export async function render(main, params, ctx) {
     const fresh = await api("/ical/regenerate", { method: "POST" });
     main.querySelector("#ical-url").value = fresh.url;
     toast("Neuer Link erzeugt");
+  });
+  // ── Freunde ──
+  on("invite", () => openSheet({
+    title: "Freund einladen",
+    fields: [{ name: "label", label: "Name (nur für dich sichtbar)", required: true, maxlength: 40, placeholder: "z. B. Max" }],
+    submitLabel: "Einladung erzeugen",
+    onSubmit: async (values) => {
+      await api("/friends/invite", { method: "POST", body: values });
+      toast("Einladung erzeugt, jetzt teilen");
+      ctx.rerender();
+    },
+  }));
+  main.querySelectorAll("[data-invite-send]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const url = button.dataset.inviteSend;
+      try {
+        if (typeof navigator.share === "function") {
+          await navigator.share({ title: "Schulkalender", text: "Hier kannst du deinen Stundenplan als Kalender einrichten:", url });
+        } else {
+          await navigator.clipboard.writeText(url);
+          toast("Einladungslink kopiert");
+        }
+      } catch (error) {
+        if (error && error.name === "AbortError") return; // Teilen abgebrochen
+        window.prompt("Bitte den Link manuell kopieren:", url);
+      }
+    });
+  });
+  main.querySelectorAll("[data-invite-revoke]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Die Einladung widerrufen? Der Link funktioniert dann nicht mehr.")) return;
+      try {
+        await api(`/friends/invite/${encodeURIComponent(button.dataset.inviteRevoke)}`, { method: "DELETE" });
+        ctx.rerender();
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    });
+  });
+  main.querySelectorAll("[data-friend-sync]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const result = await api(`/friends/${encodeURIComponent(button.dataset.friendSync)}/sync`, { method: "POST" });
+        toast(result.ok ? "Abgerufen" : result.error || "Abruf fehlgeschlagen", result.ok ? "info" : "error");
+        ctx.rerender();
+      } catch (error) {
+        toast(error.message, "error");
+        button.disabled = false;
+      }
+    });
+  });
+  main.querySelectorAll("[data-friend-remove]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm(`${button.dataset.label} entfernen? Gespeichertes Login und alle Daten werden gelöscht, der Kalender-Link hört auf zu funktionieren.`)) return;
+      try {
+        await api(`/friends/${encodeURIComponent(button.dataset.friendRemove)}`, { method: "DELETE" });
+        toast("Entfernt");
+        ctx.rerender();
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    });
   });
   on("sync", async (event) => {
     const button = event.currentTarget;

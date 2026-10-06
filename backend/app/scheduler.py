@@ -106,3 +106,5 @@ class Scheduler:
         interval = settings["poll_interval"] if school_day else settings["weekend_poll_interval"]
         if time.monotonic() - self._last_poll >= interval * 60 - 5:
             await self._poll("schedule")
+        # Freunde danach, höchstens einer pro Minute (der eigene Abruf geht vor)
+        await self.app.friends.poll_due(school_day)

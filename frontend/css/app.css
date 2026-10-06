@@ -1780,6 +1780,85 @@ kbd {
   min-width: 140px;
 }
 
+/* ── Seiten für Freunde (Einladung, eigener Kalender) ───────────── */
+
+.guest {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(28px + var(--safe-top)) 16px calc(48px + var(--safe-bottom));
+}
+.guest-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+.guest-h {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+.guest-list {
+  margin: 0;
+  padding-left: 20px;
+  color: inherit;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+.guest-list li + li {
+  margin-top: 6px;
+}
+.guest-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.guest-form .input {
+  width: 100%;
+  min-height: 46px;
+  margin-bottom: 6px;
+  font-size: 16px;
+}
+.guest-form .btn {
+  margin-top: 6px;
+}
+.guest-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.guest-check input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  accent-color: var(--ink);
+}
+.guest-help {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.guest-help summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 500;
+}
+.guest-help p {
+  margin: 10px 0 0;
+}
+
 /* ── Eigene Einträge in den Listen ──────────────────────────────── */
 
 .own-tag {

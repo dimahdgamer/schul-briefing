@@ -108,6 +108,10 @@ class Database:
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
 
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
     def execute(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
         with self._lock:
             return self._conn.execute(sql, params)
