@@ -1,10 +1,10 @@
 import { api } from "../api.js";
 import { openSheet } from "../sheet.js";
-import { addDays, daysBetween, errorState, esc, icon, inDays, longDate, query, relativeDay, shortDate, skeleton, toast } from "../ui.js";
+import { addDays, daysBetween, errorState, esc, icon, inDays, longDate, plural, query, relativeDay, shortDate, skeleton, timeAgo, toast } from "../ui.js";
 
 export const title = "Aufgaben";
 
-const TABS = ["hausaufgaben", "klausuren", "beurlaubung"];
+const TABS = ["hausaufgaben", "klausuren", "beurlaubung", "fehlzeiten"];
 const EXAM_TYPES = ["Klausur", "Test", "Klassenarbeit"];
 
 function readPref(key, fallback) {
@@ -127,6 +127,68 @@ function leavesView(data) {
     ${past.length ? `<section class="section"><h2 class="section-title">Vergangene</h2><ul class="list">${past.map(row).join("")}</ul></section>` : ""}`;
 }
 
+// ── Fehlzeiten aus dem Klassenbuch ───────────────────────────────────
+
+function markTag(mark) {
+  return `<span class="tag ${mark === "Unentschuldigt" ? "red" : "green"}">${esc(mark)}</span>`;
+}
+
+function absenceRow(a, i) {
+  return `
+    <li class="row reveal" style="--i:${i}">
+      <span class="row-icon ${a.unexcused ? "red" : "green"}">${icon(a.unexcused ? "warning-circle" : "check")}</span>
+      <div class="row-main">
+        <div class="row-title">${esc(shortDate(a.date))} <span class="muted">${esc(a.span)}</span></div>
+        <div class="row-sub">${esc(a.info.join(" · "))}</div>
+      </div>
+      <div class="btn-row" style="justify-content:flex-end">${a.marks.map(markTag).join("")}</div>
+    </li>`;
+}
+
+function absencesView(data, onlyUnexcused) {
+  if (!data.available) {
+    const text = data.reason === "disabled"
+      ? "Deine Schule gibt die Fehlzeiten für Schüler nicht frei, oder das Klassenbuch ist dort nicht aktiv. Dann gibt es nichts abzurufen."
+      : data.reason === "error"
+        ? `Der Abruf hat nicht geklappt (${esc(data.error)}). Die App versucht es später noch einmal.`
+        : "Die Fehlzeiten werden beim nächsten Abruf geladen. Das dauert höchstens ein paar Minuten.";
+    return `<div class="empty reveal"><span class="serif">Keine Fehlzeiten-Daten</span>${text}</div>`;
+  }
+  const totals = data.totals;
+  const open = data.items.filter((a) => a.unexcused);
+  const done = data.items.filter((a) => !a.unexcused);
+  const tiles = `
+    <div class="bento reveal">
+      <div class="tile">
+        <span class="tile-label">Fehlstunden</span>
+        <span class="tile-value">${totals.absent}</span>
+        <span class="tile-note">${totals.total ? `von ${totals.total} Stunden` : "dieses Schuljahr"}</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Unentschuldigt</span>
+        <span class="tile-value">${totals.unexcused}</span>
+        <span class="tile-note">${data.has_list ? `${plural(data.unexcused_entries, "Eintrag", "Einträge")} offen` : "Stunden"}</span>
+      </div>
+    </div>`;
+  const noList = data.has_list ? "" : `<p class="muted reveal">Die Liste der einzelnen Fehlzeiten ist bei deiner Schule nicht abrufbar, hier steht nur die Statistik.</p>`;
+  const openSection = open.length
+    ? `<section class="section"><h2 class="section-title">Noch nicht entschuldigt<span class="aside">${open.length}</span></h2>
+        <ul class="list">${open.map(absenceRow).join("")}</ul></section>`
+    : data.has_list ? `<div class="notice green reveal">${icon("check")}<p>Alle Fehlzeiten sind entschuldigt.</p></div>` : "";
+  const doneSection = !onlyUnexcused && done.length
+    ? `<section class="section"><h2 class="section-title">Entschuldigt<span class="aside">${done.length}</span></h2>
+        <ul class="list">${done.map(absenceRow).join("")}</ul></section>`
+    : "";
+  const subjects = data.by_subject.length
+    ? `<details class="guest-help"><summary>Fehlstunden nach Fach</summary>
+        <table class="data-table" style="margin-top:10px"><thead><tr><th>Fach</th><th class="num">Fehlstunden</th><th class="num">unentschuldigt</th></tr></thead>
+        <tbody>${data.by_subject.map((s) => `<tr><td>${esc(s.subject)}</td><td class="num">${s.absent} von ${s.total}</td><td class="num">${s.unexcused}</td></tr>`).join("")}</tbody></table>
+      </details>`
+    : "";
+  return `${tiles}${noList}${openSection}${doneSection}${subjects}
+    <p class="muted" style="margin-top:18px">Stand ${esc(timeAgo(data.fetched_at))}, laut Klassenbuch im Schulmanager.</p>`;
+}
+
 // ── Eingabe ──────────────────────────────────────────────────────────
 
 async function loadOwn() {
@@ -228,15 +290,15 @@ export async function editLeave(existing, ctx) {
 
 // ── Seite ────────────────────────────────────────────────────────────
 
-const LABELS = { hausaufgaben: "Hausaufgaben", klausuren: "Klausuren", beurlaubung: "Beurlaubung" };
-const HEADINGS = { hausaufgaben: "Haus&shy;aufgaben", klausuren: "Klassen&shy;arbeiten", beurlaubung: "Beur&shy;laubung" };
+const LABELS = { hausaufgaben: "Hausaufgaben", klausuren: "Klausuren", beurlaubung: "Beurlaubung", fehlzeiten: "Fehlzeiten" };
+const HEADINGS = { hausaufgaben: "Haus&shy;aufgaben", klausuren: "Klassen&shy;arbeiten", beurlaubung: "Beur&shy;laubung", fehlzeiten: "Fehl&shy;zeiten" };
 
 export async function render(main, params, ctx) {
   const tab = TABS.includes(params.tab) ? params.tab : "hausaufgaben";
   main.innerHTML = skeleton(4);
   let data;
   try {
-    data = await api(tab === "klausuren" ? "/exams" : tab === "beurlaubung" ? "/own" : "/homework");
+    data = await api({ klausuren: "/exams", beurlaubung: "/own", fehlzeiten: "/absences" }[tab] || "/homework");
   } catch (error) {
     if (!ctx.isCurrent()) return;
     main.innerHTML = errorState(error);
@@ -246,17 +308,26 @@ export async function render(main, params, ctx) {
   if (!ctx.isCurrent()) return;
 
   const hideDone = readPref("hideDone", false);
-  const eyebrow = tab === "hausaufgaben"
-    ? `${data.items.filter((h) => !h.done && h.due >= data.today).length} offen`
-    : tab === "klausuren"
-      ? `${data.items.filter((e) => e.date >= data.today).length} anstehend`
-      : `${data.leaves.filter((l) => l.to >= data.today).length} geplant`;
+  const onlyUnexcused = readPref("onlyUnexcused", false);
+  const eyebrow = {
+    hausaufgaben: () => `${data.items.filter((h) => !h.done && h.due >= data.today).length} offen`,
+    klausuren: () => `${data.items.filter((e) => e.date >= data.today).length} anstehend`,
+    beurlaubung: () => `${data.leaves.filter((l) => l.to >= data.today).length} geplant`,
+    fehlzeiten: () => (data.available ? `${data.totals.unexcused} unentschuldigt` : "Klassenbuch"),
+  }[tab]();
   const actions = {
     hausaufgaben: `<button class="btn ghost small" data-action="toggle-done" aria-pressed="${hideDone}">${hideDone ? "Erledigte zeigen" : "Erledigte ausblenden"}</button>`,
     klausuren: `<button class="btn small" data-action="add-exam">+ Klausur eintragen</button>`,
     beurlaubung: `<button class="btn small" data-action="add-leave">+ Beurlaubung eintragen</button>`,
+    fehlzeiten: data.available && data.has_list
+      ? `<button class="btn ghost small" data-action="toggle-unexcused" aria-pressed="${onlyUnexcused}">${onlyUnexcused ? "Auch entschuldigte zeigen" : "Nur unentschuldigte"}</button>`
+      : "",
   };
-  const body = tab === "klausuren" ? examsView(data) : tab === "beurlaubung" ? leavesView(data) : homeworkView(data, hideDone);
+  const body = {
+    klausuren: () => examsView(data),
+    beurlaubung: () => leavesView(data),
+    fehlzeiten: () => absencesView(data, onlyUnexcused),
+  }[tab]?.() ?? homeworkView(data, hideDone);
 
   main.innerHTML = `
     <header class="view-head reveal">
@@ -273,6 +344,10 @@ export async function render(main, params, ctx) {
 
   main.querySelector("[data-action=toggle-done]")?.addEventListener("click", () => {
     writePref("hideDone", !hideDone);
+    ctx.rerender();
+  });
+  main.querySelector("[data-action=toggle-unexcused]")?.addEventListener("click", () => {
+    writePref("onlyUnexcused", !onlyUnexcused);
     ctx.rerender();
   });
   main.querySelector("[data-action=add-exam]")?.addEventListener("click", () => editExam(null, ctx));

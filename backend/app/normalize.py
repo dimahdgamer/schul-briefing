@@ -300,6 +300,118 @@ def exams(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+# ── Fehlzeiten ───────────────────────────────────────────────────────
+
+# So zeigt der Schulmanager die Bescheinigung einer Krankmeldung an (certificateType)
+CERTIFICATE_LABEL = {"Medical": "Attest", "Form": "Entschuldigt", "NotRequired": "Nicht erforderlich"}
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _span(start: str, end: str) -> str:
+    if start and end:
+        return f"{start}–{end} Uhr"
+    if end:
+        return f"bis {end} Uhr"
+    if start:
+        return f"ab {start} Uhr"
+    return "ganztägig"
+
+
+def _subject_name(item: dict[str, Any]) -> str:
+    subject = item.get("subject")
+    name = _s(subject.get("name")) if isinstance(subject, dict) else _s(subject)
+    return name or "Ohne Fach"
+
+
+def absences(raw: Any) -> dict[str, Any]:
+    """Fehlzeiten laut Klassenbuch: Liste mit Entschuldigungsstatus plus Fehlstunden je Fach.
+
+    Die Regeln für den Status folgen der Anzeige im Schulmanager: Eine Krankmeldung gilt je nach
+    Bescheinigung als Attest, entschuldigt oder nicht erforderlich, sonst fehlt noch etwas. Eine
+    genehmigte Beurlaubung und ein "entschuldigt"-Vermerk zählen als entschuldigt. Gibt es nichts
+    davon, ist die Fehlzeit unentschuldigt."""
+    raw = raw if isinstance(raw, dict) else {}
+    items = []
+    for entry in raw.get("list") or []:
+        if not isinstance(entry, dict):
+            continue
+        day = _s(entry.get("date"))[:10]
+        start, end = _hhmm(entry.get("from")), _hhmm(entry.get("until"))
+        sick = entry.get("sickNote") if isinstance(entry.get("sickNote"), dict) else None
+        exemption = entry.get("exemptionRequest") if isinstance(entry.get("exemptionRequest"), dict) else None
+        comment = _s(entry.get("comment"))
+
+        info = []
+        if sick:
+            info.append("Krankgemeldet")
+        if exemption:
+            kind = "Intern beurlaubt" if exemption.get("isInternal") else "Beurlaubt"
+            info.append(f"{kind}: {_s(exemption.get('comment'))}" if _s(exemption.get("comment")) else kind)
+        if comment:
+            info.append(comment)
+        if not info:
+            info.append("Grund unbekannt")
+
+        marks = []
+        if sick:
+            marks.append(CERTIFICATE_LABEL.get(_s(sick.get("certificateType")), "Unentschuldigt"))
+        if exemption:
+            marks.append("Genehmigt")
+        if entry.get("excused"):
+            marks.append("Entschuldigt")
+        if not marks:
+            marks.append("Unentschuldigt")
+        unexcused = all(m == "Unentschuldigt" for m in marks)
+
+        items.append({
+            "id": "ab-" + _short_hash(day, start, end),
+            "date": day,
+            "start": start,
+            "end": end,
+            "span": _span(start, end),
+            "info": info,
+            "marks": marks,
+            "unexcused": unexcused,
+        })
+    items.sort(key=lambda a: (a["date"], a["start"]), reverse=True)
+
+    unexcused_by_subject = {
+        _subject_name(i): _int(i.get("absentLessons"))
+        for i in raw.get("statistics_unexcused") or [] if isinstance(i, dict)
+    }
+    by_subject = []
+    for entry in raw.get("statistics") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = _subject_name(entry)
+        by_subject.append({
+            "subject": name,
+            "absent": _int(entry.get("absentLessons")),
+            "unexcused": unexcused_by_subject.get(name, 0),
+            "total": _int(entry.get("totalLessons")),
+        })
+    by_subject.sort(key=lambda s: (-s["absent"], s["subject"]))
+
+    return {
+        "items": items,
+        "by_subject": by_subject,
+        "totals": {
+            "absent": sum(s["absent"] for s in by_subject),
+            "unexcused": sum(s["unexcused"] for s in by_subject),
+            "total": sum(s["total"] for s in by_subject),
+        },
+        "unexcused_entries": sum(1 for a in items if a["unexcused"]),
+        "has_list": raw.get("list") is not None,
+        "has_statistics": raw.get("statistics") is not None,
+    }
+
+
 # ── Elternbriefe & Nachrichten ───────────────────────────────────────
 
 

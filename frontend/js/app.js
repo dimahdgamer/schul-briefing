@@ -21,6 +21,8 @@ const TABS = [
 ];
 
 const root = document.getElementById("root");
+let role = "owner"; // Freunde mit eigener Oberfläche haben keine Post (Briefe und Nachrichten werden bei ihnen nie abgerufen)
+const visibleTabs = () => TABS.filter(([key]) => role === "owner" || key !== "post");
 let shellReady = false;
 let cleanup = null;
 let lastRender = 0;
@@ -39,7 +41,7 @@ export function navigate(hash, { replace = false } = {}) {
 }
 
 function shell() {
-  const sideLinks = TABS.filter(([key]) => key !== "verlauf").map(
+  const sideLinks = visibleTabs().filter(([key]) => key !== "verlauf").map(
     ([key, label, ic]) => `<a class="side-link" href="#/${key}" data-route="${key}">${icon(ic)}<span>${label}</span></a>`
   ).join("");
   root.innerHTML = `
@@ -64,7 +66,7 @@ function shell() {
         <main class="main" id="main" tabindex="-1"></main>
       </div>
       <nav class="tabbar" aria-label="Hauptnavigation">
-        ${TABS.map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span>${key === "verlauf" ? '<span class="badge-dot" data-badge hidden></span>' : ""}</a>`).join("")}
+        ${visibleTabs().map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span>${key === "verlauf" ? '<span class="badge-dot" data-badge hidden></span>' : ""}</a>`).join("")}
       </nav>
     </div>`;
 
@@ -116,7 +118,7 @@ async function render() {
   }
 
   const view = ROUTES[name];
-  if (!view) {
+  if (!view || (name === "post" && role !== "owner")) {
     navigate("#/heute", { replace: true });
     return;
   }
@@ -173,6 +175,7 @@ async function boot() {
   } catch {
     me = { authenticated: true }; // offline: den gecachten Stand zeigen
   }
+  role = me.role || "owner";
   if (!me.authenticated) {
     navigate("#/login", { replace: true });
   } else {

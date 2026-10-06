@@ -61,14 +61,15 @@ def _event(uid: str, summary: str, start: str, end: str | None = None, all_day_e
 
 
 def build(lessons: list[dict[str, Any]], exams: list[dict[str, Any]], events: list[dict[str, Any]],
-          tz: ZoneInfo, include_lessons: bool = True, leaves: list[dict[str, Any]] | None = None) -> str:
+          tz: ZoneInfo, include_lessons: bool = True, leaves: list[dict[str, Any]] | None = None,
+          name: str = "Schule") -> str:
     out = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//SchulBriefing//DE",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        "X-WR-CALNAME:Schule",
+        f"X-WR-CALNAME:{_escape(name)}",
         "X-WR-TIMEZONE:Europe/Berlin",
         "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
         "X-PUBLISHED-TTL:PT1H",

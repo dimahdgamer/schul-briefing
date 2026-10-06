@@ -12,19 +12,31 @@ from .db import Database
 from .friends import Friends
 from .holidays import SchoolCalendar
 from .push import Pusher
-from .sync import SyncService
+from .sync import MODULES, SyncService
 
 log = logging.getLogger(__name__)
 
 
 class AppService:
-    def __init__(self, cfg: Config) -> None:
+    """Alles für ein Konto: Datenbank, Abruf, Push und Aufbereitung für die Ansichten.
+
+    Der Besitzer hat eine eigene Instanz (`standalone`, mit der Verwaltung der Freunde). Jeder Freund mit
+    Oberfläche bekommt ebenfalls eine, mit eigener Datenbank, eigenen Push-Geräten und weniger Modulen."""
+
+    def __init__(
+        self,
+        cfg: Config,
+        modules: tuple[str, ...] = MODULES,
+        standalone: bool = True,
+        sync_pusher: Any = None,
+    ) -> None:
         self.cfg = cfg
         self.db = Database(cfg.data_dir / "schule.db")
         self.calendar = SchoolCalendar(self.db, cfg.subdivision)
         self.pusher = Pusher(self.db, cfg.data_dir, cfg.vapid_subject)
-        self.sync = SyncService(cfg, self.db, self.calendar, self.pusher)
-        self.friends = Friends(cfg, self.db, self.pusher)
+        self.sync = SyncService(cfg, self.db, self.calendar, sync_pusher or self.pusher,
+                                modules=modules, keep_raw=standalone)
+        self.friends: Friends | None = Friends(cfg, self.db, self.pusher) if standalone else None
         cal_events = self.db.snapshot("calendar")
         if cal_events:
             self.calendar.set_calendar_holidays(cal_events)
@@ -51,16 +63,19 @@ class AppService:
     def with_own(
         self, lessons: list[dict[str, Any]], first: date | None = None, last: date | None = None
     ) -> list[dict[str, Any]]:
-        """Stundenplan mit Klausuren und Beurlaubungen darüber, dazu eigener wiederkehrender Unterricht.
+        """Stundenplan mit Klausuren und Beurlaubungen darüber, dazu eigener wiederkehrender Unterricht
+        (den eine Beurlaubung ebenfalls betrifft).
 
         Der Zeitraum (first bis last) bestimmt, für welche Tage der wiederkehrende Unterricht
         erzeugt wird. Ohne Angabe gilt das Fenster des Stundenplan-Abrufs."""
-        shown = own.overlay(lessons, [own.exam_item(e) for e in self.own("exams")], self.own("leaves"))
+        leaves = self.own("leaves")
+        shown = own.overlay(lessons, [own.exam_item(e) for e in self.own("exams")], leaves)
         courses = self.own("courses")
         if courses:
             if first is None or last is None:
                 first, last = self.sync.lesson_window(self.today())
-            shown = shown + own.course_lessons(courses, first, last, self.calendar.in_official_holiday)
+            extra = own.course_lessons(courses, first, last, self.calendar.in_official_holiday)
+            shown = shown + own.mark_leave(extra, leaves)
             shown.sort(key=lambda l: (l["date"], l.get("start") or "99:99"))
         return shown
 
@@ -121,6 +136,7 @@ class AppService:
             "following_school_day": self.calendar.next_school_day(target).isoformat(),
             "next_exam": exams[0] if exams else None,
             "open_homework": len(open_hw),
+            "unexcused_absences": int((self.db.snapshot("absences") or {}).get("unexcused_entries") or 0),
             "unread_letters": letters,
             "unread_messages": messages,
             "unseen_events": self.db.unseen_count(),
@@ -264,6 +280,30 @@ class AppService:
         valid = {e["id"] for e in exams if e["date"] >= today.isoformat()}
         self.db.set("reminded", [k for k in reminded if k.split(":")[0] in valid])
         return sent
+
+    # ── Fehlzeiten ───────────────────────────────────────────────────
+
+    def absences(self) -> dict[str, Any]:
+        """Fehlzeiten für die Ansicht, mit dem Grund, falls (noch) keine da sind."""
+        data = self.db.snapshot("absences")
+        status = self.db.get("status", {}) or {}
+        if data is not None:
+            reason = None
+        elif "absences" in self.disabled_modules():
+            reason = "disabled"
+        elif (status.get("module_errors") or {}).get("absences"):
+            reason = "error"
+        else:
+            reason = "waiting"
+        return {
+            "today": self.today().isoformat(),
+            "available": data is not None,
+            "reason": reason,
+            "error": (status.get("module_errors") or {}).get("absences"),
+            "fetched_at": self.db.snapshot_time("absences"),
+            **(data or {"items": [], "by_subject": [], "totals": {"absent": 0, "unexcused": 0, "total": 0},
+                        "unexcused_entries": 0, "has_list": False, "has_statistics": False}),
+        }
 
     # ── Status ───────────────────────────────────────────────────────
 

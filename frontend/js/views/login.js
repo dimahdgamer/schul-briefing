@@ -13,10 +13,10 @@ export async function render(root, params, ctx) {
       <div class="login-card reveal">
         <span class="brand-mark" style="width:44px;height:44px;font-size:30px;border-radius:11px">S</span>
         <h1 class="display">${greeting()}</h1>
-        <p class="lede" style="margin-top:4px">Melde dich an, um Stundenplan, Vertretungen und Noten zu sehen.</p>
+        <p class="lede" style="margin-top:4px">Melde dich an, um Stundenplan, Vertretungen und Hausaufgaben zu sehen.</p>
         <form novalidate>
           <label class="visually-hidden" for="pw">Passwort</label>
-          <input class="input" id="pw" name="password" type="password" autocomplete="current-password" placeholder="Passwort" required />
+          <input class="input" id="pw" name="password" type="password" autocomplete="current-password" placeholder="Passwort oder Zugangscode" required />
           <p class="form-error" role="alert"></p>
           <button class="btn primary" type="submit">Anmelden</button>
         </form>

@@ -55,7 +55,9 @@ class FakeSchulmanager:
                          "actualLesson": {"subject": {"name": f"Fach-{self.email}", "abbreviation": "X"},
                                           "teachers": [{"lastname": "Muster"}], "room": {"name": "A1"}}}]
             elif call.endpoint == "get-events-for-user":
-                data = {"nonRecurringEvents": [], "recurringEvents": []}
+                data = {"nonRecurringEvents": [{"id": 5, "summary": "Wandertag", "start": "2026-10-14T00:00:00",
+                                                 "end": "2026-10-15T00:00:00", "allDay": True, "categoryId": 3}],
+                        "recurringEvents": []}
             else:
                 data = []
             out.append(RpcResult(200, data))
@@ -150,6 +152,8 @@ def test_invite_flow_end_to_end(setup):
 
     feed = guest.get(f"/cal/{page['url'].rsplit('/', 1)[1]}")
     assert feed.status_code == 200 and "Fach-max@schule.de" in feed.text
+    # Die Kalender der Freunde bleiben, wie sie waren: auch mit den Schulterminen im selben Kalender
+    assert "SUMMARY:Wandertag" in feed.text and "X-WR-CALNAME:Schule\r\n" in feed.text
 
 
 def test_password_is_never_exposed_or_stored_readable(setup):

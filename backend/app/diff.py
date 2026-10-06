@@ -6,7 +6,7 @@ Reine Funktionen ohne Seiteneffekte, damit sie sich gut testen lassen.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from . import fmt
@@ -223,6 +223,35 @@ def diff_exams(prev: list[dict[str, Any]] | None, curr: list[dict[str, Any]], to
 
 def _comment(exam: dict[str, Any]) -> str:
     return f"\n{exam['comment']}" if exam.get("comment") else ""
+
+
+# ── Fehlzeiten ───────────────────────────────────────────────────────
+
+
+def diff_absences(prev: dict[str, Any] | None, curr: dict[str, Any], today: date) -> list[Change]:
+    """Neue Fehlzeiten melden, damit eine fehlende Entschuldigung nicht untergeht."""
+    if prev is None:
+        return []
+    known = _by_id(prev.get("items"))
+    new = [
+        a for a in curr.get("items", [])
+        if a["id"] not in known and a["date"] >= (today - timedelta(days=14)).isoformat()
+    ]
+    if not new:
+        return []
+
+    def line(a: dict[str, Any]) -> str:
+        status = "unentschuldigt" if a["unexcused"] else ", ".join(a["marks"]).lower()
+        return f"{fmt.short_date(a['date'])}, {a['span']}: {status}"
+
+    if len(new) == 1:
+        a = new[0]
+        return [Change("absences", "new", "Neue Fehlzeit" + (" (unentschuldigt)" if a["unexcused"] else ""),
+                       line(a), a["date"], "/#/aufgaben?tab=fehlzeiten", {"ids": [a["id"]]})]
+    open_count = sum(1 for a in new if a["unexcused"])
+    title = f"{len(new)} neue Fehlzeiten" + (f", {open_count} unentschuldigt" if open_count else "")
+    return [Change("absences", "new", title, "\n".join(line(a) for a in new[:6]), None,
+                   "/#/aufgaben?tab=fehlzeiten", {"ids": [a["id"] for a in new]})]
 
 
 # ── Post ─────────────────────────────────────────────────────────────

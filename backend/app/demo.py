@@ -200,6 +200,36 @@ class DemoSource:
             "letters": state["letters"],
             "threads": state["threads"],
             "calendar": self._calendar(today),
+            "absences": self._absences(today),
+        }
+
+    def _absences(self, today: date) -> dict[str, Any]:
+        """Fehlzeiten im Format des Klassenbuchs: Statistik je Fach und Liste mit Entschuldigungsstatus."""
+        def day(back: int) -> str:
+            d = today - timedelta(days=back)
+            while d.weekday() >= 5:
+                d -= timedelta(days=1)
+            return d.isoformat()
+
+        return {
+            "statistics": [
+                {"subject": {"name": "Mathematik"}, "absentLessons": 4, "totalLessons": 80},
+                {"subject": {"name": "Deutsch"}, "absentLessons": 3, "totalLessons": 70},
+                {"subject": {"name": "Geschichte"}, "absentLessons": 1, "totalLessons": 50},
+            ],
+            "statistics_unexcused": [{"subject": {"name": "Mathematik"}, "absentLessons": 2, "totalLessons": 80}],
+            "list": [
+                {"date": day(3), "from": "07:55", "until": "09:25", "comment": None, "excused": False,
+                 "sickNote": None, "exemptionRequest": None},
+                {"date": day(12), "from": None, "until": None, "comment": None, "excused": False,
+                 "sickNote": {"certificateType": "Medical"}, "exemptionRequest": None},
+                {"date": day(20), "from": "09:45", "until": None, "comment": "Arzttermin", "excused": True,
+                 "sickNote": None, "exemptionRequest": None},
+                {"date": day(30), "from": None, "until": None, "comment": None, "excused": False,
+                 "sickNote": None, "exemptionRequest": {"isInternal": False, "comment": "Familienfeier"}},
+                {"date": day(33), "from": "10:30", "until": "11:15", "comment": None, "excused": False,
+                 "sickNote": {"certificateType": None}, "exemptionRequest": None},
+            ],
         }
 
     def lessons(self, state: dict[str, Any] | None, start: date, end: date) -> list[dict[str, Any]]:

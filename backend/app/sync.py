@@ -19,7 +19,7 @@ from .schulmanager import LoginError, RpcCall, SchulmanagerClient, SchulmanagerE
 
 log = logging.getLogger(__name__)
 
-MODULES = ("lessons", "homework", "exams", "letters", "threads", "calendar")
+MODULES = ("lessons", "homework", "exams", "letters", "threads", "calendar", "absences")
 NOTIFY_SETTING = {
     "lessons": "notify_lessons",
     "homework": "notify_homework",
@@ -27,6 +27,7 @@ NOTIFY_SETTING = {
     "letters": "notify_letters",
     "messages": "notify_messages",
     "calendar": "notify_calendar",
+    "absences": "notify_absences",
 }
 MAX_SINGLE_PUSHES = 4
 DISABLED_STATUS = {403, 404}  # "Modul nicht gebucht / für diese Rolle nicht freigegeben"
@@ -34,6 +35,8 @@ DISABLED_STATUS = {403, 404}  # "Modul nicht gebucht / für diese Rolle nicht fr
 # legt nur einen neuen Ausgangsstand an, statt alles als Änderung zu melden.
 SNAPSHOT_VERSION = 3  # 3: Zustand "eva" im Stundenplan, Hausaufgaben mit EVA-Markierung
 LOGIN_BACKOFF_SECONDS = 6 * 3600
+ABSENCES_REFRESH = 3600  # Fehlzeiten höchstens stündlich abrufen
+ABSENCES_RETRY = 24 * 3600  # nach einem Fehler (z. B. nicht freigegeben) nur einmal am Tag wieder probieren
 
 
 class SyncService:
@@ -137,7 +140,59 @@ class SyncService:
                 log.debug("Modul %s ist nicht freigeschaltet (Status %s)", name, result.status)
             elif not result.ok:
                 log.warning("Modul %s lieferte Status %s", name, result.status)
+        if "absences" in self.modules:
+            out["absences"] = await self._fetch_absences(sid, today)
         return out
+
+    async def _fetch_absences(self, sid: Any, today: date) -> tuple[bool, Any, int]:
+        """Fehlzeiten laut Klassenbuch (Statistik je Fach und Liste mit Entschuldigungsstatus).
+
+        Schulen geben das Schülern nur teilweise frei, und die Aufrufe stammen aus dem Web-Client, nicht
+        aus einer Beschreibung. Deshalb wird sparsam abgerufen (stündlich, nach einem Fehler täglich),
+        und jeder Fehler ist nur ein fehlendes Modul, nie ein Absturz."""
+        assert self.client is not None
+        state = self.db.get("absences_fetch") or {}
+        status = int(state.get("status") or 0)
+        wait = ABSENCES_REFRESH if status == 200 else ABSENCES_RETRY
+        if state and time.time() - float(state.get("at") or 0) < wait:
+            cached = self.db.get("absences_raw")
+            return (True, cached, 200) if status == 200 and cached is not None else (False, None, status)
+
+        year = today.year if today.month >= 8 else today.year - 1
+        since = date(year, 8, 1).isoformat()
+
+        def statistics(until: date, unexcused: bool) -> RpcCall:
+            return RpcCall("classbook", "get-statistics", {
+                "from": since, "until": until.isoformat(), "student": {"id": sid}, "type": "sum-all",
+                "unexcusedOnly": unexcused, "includeInternalExemptions": False, "by": "subject"})
+
+        until = today
+        everything, unexcused, term = await self.client.calls([
+            statistics(until, False), statistics(until, True),
+            RpcCall("classbook", "get-current-previous-or-next-term", {}),
+        ])
+        if everything.status == 400:
+            # Manche Schulen blenden die letzten Tage für Schüler aus: dann etwas früher aufhören
+            until = today - timedelta(days=14)
+            everything, unexcused = await self.client.calls([statistics(until, False), statistics(until, True)])
+
+        listing = None
+        if term.ok and term.data:
+            (listing,) = await self.client.calls([
+                RpcCall("classbook", "get-history-absences-list", {"term": term.data, "student": {"id": sid}})])
+
+        ok = everything.ok or bool(listing and listing.ok)
+        data = {
+            "statistics": everything.data if everything.ok else None,
+            "statistics_unexcused": unexcused.data if unexcused.ok else None,
+            "list": listing.data if listing and listing.ok else None,
+        }
+        failed = [r.status for r in (everything, listing) if r is not None and not r.ok]
+        result_status = 200 if ok else (failed[0] if failed else 0)
+        self.db.set("absences_fetch", {"at": time.time(), "status": result_status})
+        if ok:
+            self.db.set("absences_raw", data)
+        return ok, data if ok else None, result_status
 
     async def lessons_for(self, start: date, end: date) -> list[dict[str, Any]]:
         """Stundenplan für beliebige Wochen (Wochenansicht), 10 Minuten gecacht."""
@@ -255,6 +310,8 @@ class SyncService:
             return normalize.threads(data)
         if module == "calendar":
             return normalize.calendar(data)
+        if module == "absences":
+            return normalize.absences(data)
         raise ValueError(module)
 
     def _diff(self, module: str, previous: Any, items: Any, today: date) -> list[diff.Change]:
@@ -270,6 +327,8 @@ class SyncService:
             return diff.diff_threads(previous, items)
         if module == "calendar":
             return diff.diff_calendar(previous, items, today)
+        if module == "absences":
+            return diff.diff_absences(previous, items, today)
         return []
 
     def _write_raw(self, module: str, data: Any) -> None:

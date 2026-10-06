@@ -220,8 +220,8 @@ def course_lessons(
 ) -> list[dict[str, Any]]:
     """Wiederkehrender eigener Unterricht (z. B. ein Kurs an einer anderen Schule) als Stunden.
 
-    Er fällt in Ferien und an Feiertagen aus (`is_off`). Beurlaubung und Klausuren der eigenen
-    Schule ändern ihn nicht, er gehört ja zu einer anderen."""
+    Er fällt in Schulferien und an Feiertagen aus (`is_off`), nicht aber an schulfreien Tagen nur der
+    eigenen Schule. Eine Beurlaubung betrifft ihn (`mark_leave`), Klausuren verdrängen ihn nicht."""
     out: list[dict[str, Any]] = []
     day = first
     while day <= last:
@@ -251,6 +251,16 @@ def course_lessons(
                 })
         day += timedelta(days=1)
     return out
+
+
+def mark_leave(lessons: list[dict[str, Any]], leaves: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Beurlaubte Stunden bekommen den Zustand "leave". Entfall und EVA bleiben, wie sie sind."""
+    if not leaves:
+        return lessons
+    return [
+        dict(l, state="leave") if l["state"] not in ("cancelled", "eva") and _on_leave(l, leaves) else l
+        for l in lessons
+    ]
 
 
 def course_label(course: dict[str, Any]) -> str:

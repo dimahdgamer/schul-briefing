@@ -244,6 +244,12 @@ function statusNotice(status) {
   return `<div class="notice red reveal" style="margin-bottom:18px">${icon("warning-circle")}<p><strong>Letzter Abruf fehlgeschlagen.</strong> ${esc(status.last_error)}</p></div>`;
 }
 
+function absenceNotice(data) {
+  const n = data.unexcused_absences || 0;
+  if (!n) return "";
+  return `<a class="notice yellow reveal" href="#/aufgaben?tab=fehlzeiten" style="margin-bottom:12px;text-decoration:none">${icon("warning-circle")}<p><strong>${plural(n, "Fehlzeit", "Fehlzeiten")} noch nicht entschuldigt.</strong> Im Klassenbuch ansehen</p></a>`;
+}
+
 function leaveNotice(day) {
   const leaves = day.leaves || [];
   if (!leaves.length || (!day.school_day && !day.lessons.length)) return "";
@@ -315,6 +321,7 @@ export async function render(main, params, ctx) {
       <p class="lede">${lede(day, data)}</p>
     </header>
     ${statusNotice(data.status)}
+    ${absenceNotice(data)}
     ${leaveNotice(day)}
     ${breakCard(day, data)}
     ${day.lessons.length ? tiles(day, data) : ""}

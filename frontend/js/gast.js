@@ -146,6 +146,46 @@ function calendarBlock(info) {
     </section>`;
 }
 
+function uiBlock(info) {
+  if (info.ui === "offered") {
+    return `
+      <section class="card pad reveal" style="--i:3">
+        <h2 class="guest-h">App-Oberfläche für dich</h2>
+        <p style="margin:0 0 10px">Dein Freund bietet dir seine App an: dein Stundenplan mit Vertretungen, Hausaufgaben, Klausuren und Fehlzeiten, ein Morgen-Briefing und Benachrichtigungen auf dem Handy, dazu eigene Einträge für Klausuren und Beurlaubungen.</p>
+        <ul class="guest-list">
+          <li>Dafür ruft die App zusätzlich deine Hausaufgaben und, falls deine Schule sie freigibt, deine Fehlzeiten ab. Nachrichten und Elternbriefe werden nie abgerufen.</li>
+          <li>Du meldest dich mit einem eigenen Zugangscode an, den du hier bekommst.</li>
+          <li>Dein Kalender-Link bleibt genau, wie er ist.</li>
+          <li>Du kannst die Oberfläche hier jederzeit wieder abschalten. Dann werden die zusätzlichen Daten gelöscht.</li>
+        </ul>
+        <div class="btn-row" style="margin-top:14px"><button class="btn primary" type="button" data-action="ui-activate">Oberfläche aktivieren</button></div>
+      </section>`;
+  }
+  if (info.ui === "on") {
+    return `
+      <section class="card pad reveal" style="--i:3">
+        <h2 class="guest-h">Deine App</h2>
+        <p style="margin:0 0 10px">Öffne die App-Adresse und melde dich mit deinem Zugangscode an. Der Code ist nur für dich, gib ihn nicht weiter.</p>
+        <div class="field-label">Zugangscode</div>
+        <div class="copy-field" style="margin:6px 0 12px">
+          <input class="input" readonly value="${esc(info.code || "")}" aria-label="Zugangscode" id="g-code" style="letter-spacing:0.08em" />
+          <button class="btn small" type="button" data-action="copy" data-target="g-code">Kopieren</button>
+        </div>
+        <div class="btn-row">
+          <a class="btn primary" href="${esc(info.app_url)}">App öffnen</a>
+          <button class="btn small" type="button" data-action="ui-newcode">Neuen Code erzeugen</button>
+          <button class="btn small" type="button" data-action="ui-off">Oberfläche abschalten</button>
+        </div>
+        <details class="guest-help">
+          <summary>Auf den Home-Bildschirm legen</summary>
+          <p><strong>iPhone:</strong> App-Adresse in Safari öffnen, Teilen, „Zum Home-Bildschirm“. Danach die App von dort öffnen und den Code eingeben (ab iOS 16.4 gibt es dann auch Benachrichtigungen).</p>
+          <p><strong>Android:</strong> App-Adresse in Chrome öffnen, Menü, „App installieren“.</p>
+        </details>
+      </section>`;
+  }
+  return "";
+}
+
 function manageBlock(info) {
   const needsLogin = info.state === "needs_login";
   return `
@@ -177,6 +217,7 @@ async function friendPage(preloaded) {
     </header>
     ${statusBlock(info)}
     ${calendarBlock(info)}
+    ${uiBlock(info)}
     ${manageBlock(info)}`);
 
   const redraw = (fresh) => friendPage(fresh);
@@ -188,16 +229,30 @@ async function friendPage(preloaded) {
     });
   });
   const on = (action, handler) => root.querySelector(`[data-action="${action}"]`)?.addEventListener("click", handler);
-  on("copy", async () => {
-    const field = root.querySelector("#g-url");
-    try {
-      await navigator.clipboard.writeText(field.value);
-      toast("Link kopiert");
-    } catch {
-      field.select();
-      toast("Bitte manuell kopieren", "error");
-    }
+  root.querySelectorAll('[data-action="copy"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      const field = root.querySelector(`#${button.dataset.target || "g-url"}`);
+      try {
+        await navigator.clipboard.writeText(field.value);
+        toast("Kopiert");
+      } catch {
+        field.select();
+        toast("Bitte manuell kopieren", "error");
+      }
+    });
   });
+  const ui = (action, message, confirmText) => async () => {
+    if (confirmText && !confirm(confirmText)) return;
+    try {
+      redraw(await api(`/friend${BASE}/ui`, { method: "POST", body: { action } }));
+      toast(message);
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  };
+  on("ui-activate", ui("activate", "Oberfläche aktiviert"));
+  on("ui-newcode", ui("new-code", "Neuer Zugangscode erzeugt", "Der alte Zugangscode funktioniert danach nicht mehr, du musst dich in der App neu anmelden. Fortfahren?"));
+  on("ui-off", ui("deactivate", "Oberfläche abgeschaltet", "Die Oberfläche abschalten? Dein Zugangscode wird ungültig, und die zusätzlich abgerufenen Daten (Hausaufgaben, Fehlzeiten) sowie Geräte für Benachrichtigungen werden gelöscht. Dein Kalender-Link bleibt."));
   on("toggle-login", () => {
     const box = root.querySelector("#g-login");
     box.hidden = !box.hidden;

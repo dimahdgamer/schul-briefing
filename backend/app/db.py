@@ -81,6 +81,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notify_letters": True,
     "notify_messages": True,
     "notify_calendar": True,
+    "notify_absences": True,
     "poll_interval": 15,
     "poll_start": "06:00",
     "poll_end": "21:30",

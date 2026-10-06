@@ -24,12 +24,13 @@ ein Briefing. Läuft im Docker-Container auf dem Raspberry Pi unter
 | **Aufgaben** | Hausaufgaben nach Fälligkeit (nächste Stunde im jeweiligen Fach) mit Abhaken (nur lokal), Klassenarbeiten mit Countdown. |
 | **Eigene Klausuren** | Klausuren, die nicht im Schulmanager stehen, trägt man in Aufgaben → Klausuren selbst ein (Fach, Datum, von–bis, Art, Notiz). In dieser Zeit entfällt der übrige Unterricht, die Klausur steht als eigene Zeile im Tag. Beginn, Schluss und die Briefing-Uhrzeit richten sich nach ihr. Erinnerungen, Briefing, Woche und Kalender-Abo kennen sie wie jede andere Arbeit. Die Einträge liegen in der App-Datenbank (`data/`) und werden vom Schulmanager-Abruf nie überschrieben. Trägt die Schule dieselbe Klausur später selbst ein, erscheint sie doppelt, dann den eigenen Eintrag löschen. |
 | **Beurlaubung** | In Aufgaben → Beurlaubung trägt man ein, wann man von der Schule freigestellt ist: ganze Tage von–bis oder einzelne Stunden an einem Tag („3.–6. Stunde“), dazu ein optionaler Grund. Beurlaubte Stunden zählen wie Entfall. An komplett beurlaubten Tagen kommt kein Morgen-Briefing. |
-| **Eigener Unterricht** | Unterricht, den der Schulmanager nicht kennt (z. B. ein Kurs an einer anderen Schule), trägt man unter Einstellungen → Eigener Unterricht einmal ein: Fach, Wochentage, von–bis, Ort, optional gültig ab/bis. Er steht jede Woche in Heute, Woche, Briefing und Kalender-Abo, mit der Stundennummer aus der Uhrzeit (15:00–17:15 = „9–11“) und dem Tag „Extern“. Er zählt für den Schluss, fällt in Schulferien und an Feiertagen aus (nicht an schulfreien Tagen nur der eigenen Schule) und wird von Beurlaubungen und Klausuren der eigenen Schule nicht verändert. |
-| **Freunde** | Freunde an derselben Schule bekommen ihren Stundenplan als Kalender-Link. Einstellungen → Freunde → „Freund einladen“ erzeugt einen Einladungslink (einmal verwendbar, 7 Tage gültig, höchstens 5 Fehlversuche). Der Freund öffnet ihn, gibt sein Schulmanager-Login selbst ein und bekommt Link und Anleitung. Auf seiner Seite (`/freund/<geheim>`) kann er den Link erneuern, sein Login ändern und alles löschen. Du siehst nur Name, Status und letzten Abruf. Details unter „Freunde und ihre Daten“. |
+| **Fehlzeiten** | Aufgaben → Fehlzeiten zeigt Fehlstunden laut Klassenbuch: Statistik je Fach und die Liste „Alle Abwesenheiten“ mit Entschuldigungsstatus (Attest, entschuldigt, genehmigt, nicht erforderlich, unentschuldigt). Unentschuldigtes steht oben und als Hinweis in Heute, neue Fehlzeiten werden gemeldet. Der Schulmanager zeigt das Schülern nur, wenn die Schule es freigibt, sonst erklärt die App das. Abgerufen wird stündlich, nach einem Fehler nur einmal am Tag. |
+| **Eigener Unterricht** | Unterricht, den der Schulmanager nicht kennt (z. B. ein Kurs an einer anderen Schule), trägt man unter Einstellungen → Eigener Unterricht einmal ein: Fach, Wochentage, von–bis, Ort, optional gültig ab/bis. Er steht jede Woche in Heute, Woche, Briefing und Kalender-Abo, mit der Stundennummer aus der Uhrzeit (15:00–17:15 = „9–11“) und dem Tag „Extern“. Er zählt für den Schluss, fällt in Schulferien und an Feiertagen aus (nicht an schulfreien Tagen nur der eigenen Schule, etwa einem Lehrertag). Eine Beurlaubung betrifft ihn ebenfalls. |
+| **Freunde** | Freunde an derselben Schule bekommen ihren Stundenplan als Kalender-Link. Einstellungen → Freunde → „Freund einladen“ erzeugt einen Einladungslink (einmal verwendbar, 7 Tage gültig, höchstens 5 Fehlversuche). Der Freund öffnet ihn, gibt sein Schulmanager-Login selbst ein und bekommt Link und Anleitung. Auf seiner Seite (`/freund/<geheim>`) kann er den Link erneuern, sein Login ändern und alles löschen. Du siehst nur Name, Status und letzten Abruf. Optional bietest du einem Freund eine **eigene Oberfläche** an (siehe unten). Details unter „Freunde und ihre Daten“. |
 | **EVA** | Eigenverantwortliches Arbeiten führt Schulmanager als Vertretung mit Raum „EVA“. Die App erkennt es daran und behandelt es wie Entfall (kein Weg zur Schule: Beginn, Schluss und Freistunden werden ohne EVA-Stunden berechnet). Heute und Briefing zeigen pro EVA-Stunde die Aufgaben, die in der letzten Stunde des Fachs oder am EVA-Tag selbst eingestellt wurden, oder „noch keine Aufgaben eingestellt“. Ältere Aufgaben gelten nicht als fällig. |
 | **Post** | Elternbriefe und Nachrichten, Antippen öffnet Schulmanager. |
 | **Verlauf** | Jede erkannte Änderung mit Zeitstempel. |
-| **Kalender-Abo** | iCal-Link für den Handy-Kalender: alle Stunden von letzter Woche bis vier Wochen voraus inkl. Vertretungen, Ausfällen, EVA und Raumänderungen, dazu Arbeiten und Schultermine. |
+| **Kalender-Abo** | iCal-Link für den Handy-Kalender: alle Stunden von letzter Woche bis vier Wochen voraus inkl. Vertretungen, Ausfällen, EVA und Raumänderungen, dazu Klausuren, Beurlaubungen und eigener Unterricht. Die Schultermine aus dem Schulmanager-Kalender stehen nicht darin, sie gibt es als eigenen, optionalen Kalender (derselbe Link mit `?termine=1`). Die Kalender-Links der Freunde bleiben unverändert. |
 | **Ferien** | NRW-Ferien und Feiertage (OpenHolidays API) plus schulfreie Tage aus dem Schulkalender. In den Ferien gibt es kein Briefing, und es wird seltener abgefragt. |
 | **Offline** | Die zuletzt geladenen Daten bleiben ohne Netz sichtbar. |
 
@@ -312,8 +313,8 @@ Konto), du bekommst einen Push, und der Freund sieht auf seiner Seite „Login e
 
 - **Getrennt:** Jeder Freund hat eigene Daten unter `data/accounts/<id>/` und einen eigenen
   Abruf. Dein eigenes Konto und die App bleiben davon unberührt.
-- **Nur der Kalender:** Abgerufen werden Stundenplan, Klassenarbeiten und Schultermine.
-  Nachrichten, Elternbriefe, Hausaufgaben und Noten werden bei Freunden nie angefragt.
+- **Nur der Kalender:** Ohne Oberfläche werden Stundenplan, Klassenarbeiten und Schultermine abgerufen.
+  Nachrichten, Elternbriefe und Noten werden bei Freunden nie angefragt, Hausaufgaben und Fehlzeiten nur mit Oberfläche.
   Rohantworten werden nicht gespeichert, Freunde bekommen keine eigenen Meldungen.
 - **Passwort:** Es liegt verschlüsselt (Fernet) in deiner Datenbank, der Schlüssel in
   `data/accounts.key`. Das schützt, wenn jemand nur die Datenbank-Datei bekommt. Wer vollen
@@ -325,6 +326,24 @@ Konto), du bekommst einen Push, und der Freund sieht auf seiner Seite „Login e
   Einstellungen entfernen. Beides löscht Passwort, Datenbank und Kalender-Link.
 - **Grenzen:** Gleiche Schule (die Stundenzeiten stehen fest in `bell.py`) und kein Zwei-Faktor-Login.
   Höchstens 10 Freunde einschließlich offener Einladungen.
+
+### Eigene Oberfläche für Freunde
+
+- **Angebot und Zustimmung:** Der Besitzer bietet sie in Einstellungen → Freunde an („Oberfläche anbieten“).
+  Aktiv wird sie erst, wenn der Freund auf seiner Seite zustimmt. Vorher wird nichts zusätzlich abgerufen,
+  denn bei der Einladung wurde ihm nur Stundenplan, Klassenarbeiten und Schultermine zugesagt.
+- **Anmeldung:** Der Freund bekommt einen eigenen Zugangscode (16 Zeichen, nur für ihn) und gibt ihn im normalen
+  Anmeldefeld der App ein, wo der Besitzer sein App-Passwort eingibt. Der Code lässt sich auf seiner Seite erneuern.
+- **Was er bekommt:** Heute, Woche, Aufgaben (Hausaufgaben, Klausuren, Beurlaubung, Fehlzeiten), Verlauf und
+  Einstellungen mit eigenem Briefing, eigenen Push-Geräten und eigenen Einträgen. Es gibt weder Post (Briefe und
+  Nachrichten werden nie abgerufen) noch die Verwaltung der Freunde.
+- **Getrennt:** Jedes Konto hat seine Datenbank, seinen Push-Schlüssel und seinen Takt. Ein Freund sieht nie Daten
+  des Besitzers oder anderer Freunde, und Besitzer-Funktionen antworten ihm mit 403.
+- **Abschalten:** Der Besitzer oder der Freund kann die Oberfläche jederzeit abschalten. Der Code und alle Sitzungen
+  gelten sofort nicht mehr, Hausaufgaben, Fehlzeiten und Push-Geräte werden gelöscht. Was der Freund selbst eingetragen
+  hat, bleibt. Der Kalender-Link ändert sich dabei nie.
+- **Kalender-Links bleiben:** Die Links der Freunde und ihr Inhalt (Stunden, Klassenarbeiten, Schultermine) sind mit
+  und ohne Oberfläche identisch. Eigene Einträge des Freundes stehen nur in seiner App.
 
 ## Fehlersuche
 

@@ -298,23 +298,51 @@ def test_course_crud(client):
     assert http.get("/api/own").json()["courses"] == []
 
 
-def test_course_shows_in_day_and_week_and_ignores_leave(client):
+def test_course_shows_in_day_and_week_and_follows_leave(client):
     http, main = client
     http.post("/api/login", json={"password": "geheim"})
     http.post("/api/own/courses", json=COURSE)
-    # Donnerstag ganztägig beurlaubt: die Schulstunden entfallen, Russisch an der anderen Schule nicht
-    http.post("/api/own/leaves", json={"from": "2026-10-08", "to": "2026-10-08"})
     main.service.db.save_snapshot("lessons", [
         {"id": "a", "date": "2026-10-08", "hour": "1", "state": "regular", "start": "07:55", "end": "08:40", "subject": "Mathematik"},
     ])
     day = http.get("/api/overview?date=2026-10-08").json()["day"]
-    assert [(l["state"], l["subject"]) for l in day["lessons"]] == [("leave", "Mathematik"), ("external", "Russisch")]
-    assert (day["start"], day["end"]) == ("15:00", "17:15") and not day["all_cancelled"]
+    assert [(l["state"], l["subject"]) for l in day["lessons"]] == [("regular", "Mathematik"), ("external", "Russisch")]
+    assert (day["start"], day["end"]) == ("07:55", "17:15")
 
     week = http.get("/api/week?start=2026-10-05").json()
     thursday = week["days"][3]["lessons"]
     assert [l["subject"] for l in thursday if l["state"] == "external"] == ["Russisch"]
     assert not [l for d in week["days"][:3] + week["days"][4:] for l in d["lessons"] if l["state"] == "external"]
+
+    # Ganztägig beurlaubt: auch Russisch entfällt für dich
+    http.post("/api/own/leaves", json={"from": "2026-10-08", "to": "2026-10-08"})
+    day = http.get("/api/overview?date=2026-10-08").json()["day"]
+    assert [(l["state"], l["subject"]) for l in day["lessons"]] == [("leave", "Mathematik"), ("leave", "Russisch")]
+    assert day["all_cancelled"] and day["start"] == ""
+
+
+def test_course_is_not_touched_by_a_school_free_day(client):
+    """Ein Lehrertag oder Studientag deiner Schule betrifft nur die Schule, Russisch findet statt."""
+    http, main = client
+    http.post("/api/login", json={"password": "geheim"})
+    http.post("/api/own/courses", json=COURSE)
+    main.service.calendar.set_calendar_holidays([{"is_holiday": True, "start": "2026-10-08T00:00:00",
+                                                  "end": "2026-10-09T00:00:00", "all_day": True, "title": "Lehrertag"}])
+    assert not main.service.calendar.is_school_day(date(2026, 10, 8))  # für deine Schule ist frei
+    day = http.get("/api/overview?date=2026-10-08").json()["day"]
+    assert [(l["state"], l["subject"]) for l in day["lessons"] if l["subject"] == "Russisch"] == [("external", "Russisch")]
+
+
+def test_leave_by_hours_only_hits_courses_in_that_time(client):
+    http, main = client
+    http.post("/api/login", json={"password": "geheim"})
+    http.post("/api/own/courses", json=COURSE)
+    http.post("/api/own/leaves", json={"from": "2026-10-08", "hour_from": "3", "hour_to": "4"})  # Vormittag
+    day = http.get("/api/overview?date=2026-10-08").json()["day"]
+    assert [l["state"] for l in day["lessons"] if l["subject"] == "Russisch"] == ["external"]
+    http.post("/api/own/leaves", json={"from": "2026-10-08", "hour_from": "10", "hour_to": "11"})  # Nachmittag
+    day = http.get("/api/overview?date=2026-10-08").json()["day"]
+    assert [l["state"] for l in day["lessons"] if l["subject"] == "Russisch"] == ["leave"]
 
 
 def test_day_stays_on_thursday_until_russian_is_over(client, monkeypatch):
@@ -340,3 +368,28 @@ def test_course_in_calendar_feed_via_api(client):
     token = http.get("/api/ical").json()["url"].rsplit("/", 1)[1]
     feed = http.get(f"/cal/{token}").text
     assert "SUMMARY:Russisch" in feed and "LOCATION:Andere Schule" in feed
+
+
+# ── Kalender: Stundenplan und Schultermine getrennt ──────────────────
+
+def test_school_events_have_their_own_calendar(client):
+    http, main = client
+    http.post("/api/login", json={"password": "geheim"})
+    main.service.db.save_snapshot("calendar", [{
+        "id": "1@2026-10-14", "title": "Elternsprechtag", "start": "2026-10-14T15:00:00", "end": "2026-10-14T19:00:00",
+        "all_day": False, "location": "Aula", "description": "", "is_holiday": False}])
+    main.service.db.save_snapshot("exams", [{
+        "id": "e1", "subject": "Physik", "type": "Test", "date": "2026-10-20", "start": "", "end": "", "hour": "",
+        "comment": ""}])
+    links = http.get("/api/ical").json()
+    token = links["url"].rsplit("/", 1)[1]
+    assert links["events_url"].endswith("/cal/" + token + "?termine=1") and links["events_webcal"].startswith("webcal://")
+
+    timetable = http.get(f"/cal/{token}").text
+    assert "Elternsprechtag" not in timetable and "SUMMARY:Test: Physik" in timetable
+    assert "X-WR-CALNAME:Schule\r\n" in timetable
+
+    events = http.get(f"/cal/{token}?termine=1").text
+    assert "SUMMARY:Elternsprechtag" in events and "Physik" not in events and "X-WR-CALNAME:Schultermine" in events
+    # Vom Besucher gesendeter Parameter ersetzt das Geheimnis nicht
+    assert http.get("/cal/falsch.ics?termine=1").status_code == 404

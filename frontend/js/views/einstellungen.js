@@ -13,12 +13,13 @@ const NOTIFY = [
   ["notify_letters", "Elternbriefe", "Neue Briefe der Schule"],
   ["notify_messages", "Nachrichten", "Neue Nachrichten im Messenger"],
   ["notify_calendar", "Termine", "Neue Einträge im Schulkalender"],
+  ["notify_absences", "Fehlzeiten", "Neue Fehlzeiten im Klassenbuch, auch unentschuldigte"],
 ];
 
 const REMINDER_DAYS = [1, 2, 3, 5, 7, 14];
 const MODULE_NAMES = {
   lessons: "Stundenplan", homework: "Hausaufgaben", exams: "Klassenarbeiten",
-  letters: "Elternbriefe", threads: "Nachrichten", calendar: "Kalender",
+  letters: "Elternbriefe", threads: "Nachrichten", calendar: "Kalender", absences: "Fehlzeiten",
 };
 
 function readTheme() {
@@ -147,7 +148,7 @@ function coursesSection(own) {
   return `
     <div class="card">
       <div class="field stack">
-        <div class="field-help">Unterricht, den der Schulmanager nicht kennt, zum Beispiel ein Kurs an einer anderen Schule. Er steht jede Woche im Plan und zählt für den Schluss. In Ferien und an Feiertagen fällt er aus. Beurlaubungen und Klausuren deiner Schule ändern ihn nicht.</div>
+        <div class="field-help">Unterricht, den der Schulmanager nicht kennt, zum Beispiel ein Kurs an einer anderen Schule. Er steht jede Woche im Plan und zählt für den Schluss. In Schulferien und an Feiertagen fällt er aus, an schulfreien Tagen nur deiner Schule (z. B. Lehrertag) nicht. Eine Beurlaubung betrifft ihn auch.</div>
       </div>
       ${rows}
       <div class="field"><button class="btn small" data-action="add-course">+ Eigenen Unterricht eintragen</button></div>
@@ -184,6 +185,11 @@ function editCourse(existing, ctx) {
   });
 }
 
+const FRIEND_UI = {
+  offered: '<span class="tag yellow">Oberfläche angeboten</span>',
+  on: '<span class="tag blue">Oberfläche aktiv</span>',
+};
+
 const FRIEND_STATE = {
   ok: '<span class="tag green">aktiv</span>',
   waiting: '<span class="tag yellow">wartet</span>',
@@ -192,15 +198,22 @@ const FRIEND_STATE = {
 
 function friendsSection(data) {
   const share = typeof navigator.share === "function";
+  const uiHelp = {
+    off: "Nur der Kalender-Link.",
+    offered: "Du hast die Oberfläche angeboten. Sie wird erst aktiv, wenn dein Freund auf seiner Seite zustimmt.",
+    on: "Dein Freund nutzt seine eigene App mit eigenem Zugangscode.",
+  };
   const friends = data.friends.map((f) => `
-    <div class="field">
+    <div class="field stack">
       <div>
-        <div class="field-label">${esc(f.label)} ${FRIEND_STATE[f.state] || ""}</div>
+        <div class="field-label">${esc(f.label)} ${FRIEND_STATE[f.state] || ""} ${FRIEND_UI[f.ui] || ""}</div>
         <div class="field-help">${f.state === "needs_login"
           ? "Das Login stimmt nicht mehr, dein Freund muss es auf seiner Seite erneuern."
           : `zuletzt aktualisiert ${esc(timeAgo(f.last_success))}${f.last_error ? ` · ${esc(f.last_error)}` : ""}`}</div>
+        <div class="field-help">${esc(uiHelp[f.ui] || uiHelp.off)}</div>
       </div>
       <div class="btn-row">
+        <button class="btn small" data-friend-ui="${esc(f.id)}" data-offered="${f.ui === "off" ? "1" : "0"}" data-state="${esc(f.ui)}" data-label="${esc(f.label)}">${f.ui === "off" ? "Oberfläche anbieten" : "Oberfläche zurückziehen"}</button>
         <button class="btn small" data-friend-sync="${esc(f.id)}" ${f.state === "needs_login" ? "disabled" : ""}>Abrufen</button>
         <button class="btn small ghost" data-friend-remove="${esc(f.id)}" data-label="${esc(f.label)}">Entfernen</button>
       </div>
@@ -219,7 +232,7 @@ function friendsSection(data) {
   return `
     <div class="card">
       <div class="field stack">
-        <div class="field-help">Freunde bekommen ihren Stundenplan als Kalender-Link. Du schickst ihnen einen Einladungslink, dort geben sie ihr Schulmanager-Login selbst ein. Du siehst es nie. Abgerufen werden nur Stundenplan, Klassenarbeiten und Schultermine, etwa einmal pro Stunde.</div>
+        <div class="field-help">Freunde bekommen ihren Stundenplan als Kalender-Link. Du schickst ihnen einen Einladungslink, dort geben sie ihr Schulmanager-Login selbst ein. Du siehst es nie. Abgerufen werden nur Stundenplan, Klassenarbeiten und Schultermine, etwa einmal pro Stunde. Optional kannst du einem Freund eine eigene App-Oberfläche anbieten. Sie wird erst aktiv, wenn er auf seiner Seite zustimmt, und ruft dann zusätzlich Hausaufgaben und Fehlzeiten ab.</div>
       </div>
       ${friends}${invites}
       ${!friends && !invites ? '<div class="field"><div class="field-help">Noch niemand eingeladen.</div></div>' : ""}
@@ -267,7 +280,7 @@ export async function render(main, params, ctx) {
   main.innerHTML = skeleton(6);
   let settings, status, ical, subscription, devices, bell, me, friends, own;
   try {
-    [settings, status, ical, subscription, devices, bell, me, friends, own] = await Promise.all([
+    [settings, status, ical, subscription, devices, bell, me, own] = await Promise.all([
       api("/settings"),
       api("/status"),
       api("/ical"),
@@ -275,9 +288,10 @@ export async function render(main, params, ctx) {
       api("/push/devices").then((d) => d.devices.length),
       api("/bell"),
       api("/me"),
-      api("/friends"),
       api("/own"),
     ]);
+    // Die Verwaltung der Freunde gibt es nur für den Besitzer, ein Freund mit Oberfläche hat sie nicht
+    friends = me.role === "owner" ? await api("/friends") : null;
   } catch (error) {
     if (!ctx.isCurrent()) return;
     main.innerHTML = errorState(error);
@@ -321,7 +335,7 @@ export async function render(main, params, ctx) {
     <section class="section reveal" style="--i:4">
       <h2 class="section-title">Sofort melden</h2>
       <div class="card">
-        ${NOTIFY.map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`).join("")}
+        ${NOTIFY.filter(([key]) => me.role === "owner" || !["notify_letters", "notify_messages"].includes(key)).map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`).join("")}
       </div>
     </section>
 
@@ -349,16 +363,27 @@ export async function render(main, params, ctx) {
       <h2 class="section-title">Kalender-Abo</h2>
       <div class="card">
         <div class="field stack">
-          <div class="field-help">Stundenplan mit Vertretungen, Klassenarbeiten und Schultermine im Handy-Kalender. Der Link ist geheim, wer ihn kennt, sieht den Plan.</div>
+          <div class="field-help">Stundenplan mit Vertretungen, Entfall, EVA, Klausuren, Beurlaubungen und eigenem Unterricht im Handy-Kalender. Der Link ist geheim, wer ihn kennt, sieht den Plan.</div>
           <div class="copy-field">
             <input class="input" readonly value="${esc(ical.url)}" aria-label="Kalender-Link" id="ical-url" />
-            <button class="btn small" data-action="copy">${icon("copy", "sm")}Kopieren</button>
+            <button class="btn small" data-action="copy" data-target="ical-url">${icon("copy", "sm")}Kopieren</button>
           </div>
           <div class="btn-row">
             <a class="btn small" href="${esc(ical.webcal)}">${icon("calendar-dots", "sm")}Im Kalender öffnen</a>
             <button class="btn small ghost" data-action="ical-new">Neuen Link erzeugen</button>
           </div>
         </div>
+        ${ical.events_url ? `<div class="field stack">
+          <div class="field-label">Schultermine (optional, eigener Kalender)</div>
+          <div class="field-help">Die Termine aus dem Schulmanager-Kalender (Elternsprechtag, Wandertag …) stehen nicht im Stundenplan-Kalender, damit er übersichtlich bleibt. Wer sie sehen will, abonniert diesen zweiten Kalender. Er hat dasselbe Geheimnis, ein neuer Link oben erneuert auch diesen.</div>
+          <div class="copy-field">
+            <input class="input" readonly value="${esc(ical.events_url)}" aria-label="Link Schultermine" id="ical-events-url" />
+            <button class="btn small" data-action="copy" data-target="ical-events-url">${icon("copy", "sm")}Kopieren</button>
+          </div>
+          <div class="btn-row">
+            <a class="btn small" href="${esc(ical.events_webcal)}">${icon("calendar-dots", "sm")}Im Kalender öffnen</a>
+          </div>
+        </div>` : ""}
       </div>
     </section>
 
@@ -367,10 +392,10 @@ export async function render(main, params, ctx) {
       ${coursesSection(own)}
     </section>
 
-    <section class="section reveal" style="--i:6">
+    ${friends ? `<section class="section reveal" style="--i:6">
       <h2 class="section-title">Freunde</h2>
       ${friendsSection(friends)}
-    </section>
+    </section>` : ""}
 
     <section class="section reveal" style="--i:7">
       <h2 class="section-title">Darstellung</h2>
@@ -522,20 +547,23 @@ export async function render(main, params, ctx) {
       toast(error.message, "error");
     }
   });
-  on("copy", async () => {
-    const field = main.querySelector("#ical-url");
-    try {
-      await navigator.clipboard.writeText(field.value);
-      toast("Link kopiert");
-    } catch {
-      field.select();
-      toast("Bitte manuell kopieren", "error");
-    }
+  main.querySelectorAll('[data-action="copy"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      const field = main.querySelector(`#${button.dataset.target}`);
+      try {
+        await navigator.clipboard.writeText(field.value);
+        toast("Link kopiert");
+      } catch {
+        field.select();
+        toast("Bitte manuell kopieren", "error");
+      }
+    });
   });
   on("ical-new", async () => {
     if (!confirm("Der alte Link funktioniert danach nicht mehr. Fortfahren?")) return;
     const fresh = await api("/ical/regenerate", { method: "POST" });
     main.querySelector("#ical-url").value = fresh.url;
+    main.querySelector("#ical-events-url").value = fresh.events_url;
     toast("Neuer Link erzeugt");
   });
   // ── Eigener Unterricht ──
@@ -576,6 +604,22 @@ export async function render(main, params, ctx) {
       if (!confirm("Die Einladung widerrufen? Der Link funktioniert dann nicht mehr.")) return;
       try {
         await api(`/friends/invite/${encodeURIComponent(button.dataset.inviteRevoke)}`, { method: "DELETE" });
+        ctx.rerender();
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    });
+  });
+  main.querySelectorAll("[data-friend-ui]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const offered = button.dataset.offered === "1";
+      const withdraw = !offered && button.dataset.state === "on"
+        ? `Die Oberfläche von ${button.dataset.label} abschalten? Der Zugangscode wird sofort ungültig, die zusätzlich abgerufenen Daten (Hausaufgaben, Fehlzeiten) und die Geräte für Benachrichtigungen werden gelöscht. Der Kalender-Link bleibt.`
+        : null;
+      if (withdraw && !confirm(withdraw)) return;
+      try {
+        await api(`/friends/${encodeURIComponent(button.dataset.friendUi)}/ui`, { method: "POST", body: { offered } });
+        toast(offered ? "Angeboten: dein Freund muss auf seiner Seite zustimmen" : "Zurückgezogen");
         ctx.rerender();
       } catch (error) {
         toast(error.message, "error");

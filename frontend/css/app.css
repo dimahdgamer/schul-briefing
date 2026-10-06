@@ -1027,12 +1027,14 @@ a.row:hover {
 }
 .segmented.wide {
   display: flex;
+  flex-wrap: wrap; /* bei vier Reitern auf schmalen Handys in zwei Zeilen */
   width: 100%;
 }
 .segmented.wide a {
-  flex: 1;
-  padding: 8px 4px;
+  flex: 1 1 auto;
+  padding: 8px 10px;
   text-align: center;
+  white-space: nowrap;
 }
 .segmented [aria-pressed="true"],
 .segmented [aria-current="page"] {
@@ -1216,6 +1218,10 @@ kbd {
 .notice.blue {
   background: var(--blue-bg);
   color: var(--blue);
+}
+.notice.green {
+  background: var(--green-bg);
+  color: var(--green);
 }
 .notice p {
   margin: 0;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import hmac
 import logging
@@ -27,8 +28,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("schule")
 
 cfg = config.load()
-service = AppService(cfg)
-scheduler = Scheduler(service)
+owner = AppService(cfg)
+scheduler = Scheduler(owner)
+
+# Jede angemeldete Anfrage arbeitet mit "ihrem" Konto: der Besitzer mit seinem, ein Freund mit eigener
+# Oberfläche mit seinem. `require_auth` setzt es, ohne Anmeldung (öffentliche Seiten) gilt der Besitzer.
+_current: contextvars.ContextVar[AppService] = contextvars.ContextVar("service", default=owner)
+
+
+class _CurrentService:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_current.get(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(_current.get(), name, value)
+
+
+service: Any = _CurrentService()
 
 
 @asynccontextmanager
@@ -38,7 +54,7 @@ async def lifespan(_app: FastAPI):
     yield
     await scheduler.stop()
     await service.sync.close()
-    await service.friends.close()
+    await owner.friends.close()
 
 
 app = FastAPI(title="Schul-Briefing", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -104,9 +120,34 @@ async def cache_headers(request: Request, call_next):
 _failed_logins: dict[str, list[float]] = defaultdict(list)
 
 
-def require_auth(request: Request) -> None:
+def _identity(request: Request) -> tuple[str, AppService] | None:
+    """(Rolle, Konto) der angemeldeten Sitzung, None ohne gültige Anmeldung."""
     if not request.session.get("auth"):
+        return None
+    who = request.session.get("who") or "owner"  # Sitzungen von vor den Freunden haben kein "who" und sind die des Besitzers
+    if who == "owner":
+        return "owner", owner
+    entry = owner.friends.entry(who)
+    if entry is None or entry.get("ui") != "on":
+        return None  # Oberfläche abgeschaltet oder Freund gelöscht: die Sitzung gilt sofort nicht mehr
+    try:
+        return "friend", owner.friends.app_for(entry)
+    except FriendError:
+        return None
+
+
+async def require_auth(request: Request) -> None:
+    found = _identity(request)
+    if found is None:
         raise HTTPException(status_code=401, detail="Nicht angemeldet")
+    request.state.role = found[0]
+    _current.set(found[1])
+
+
+async def require_owner(request: Request) -> None:
+    await require_auth(request)
+    if request.state.role != "owner":
+        raise HTTPException(status_code=403, detail="Das darf nur der Besitzer")
 
 
 def _client_ip(request: Request) -> str:
@@ -127,11 +168,17 @@ async def login(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     if len(attempts) >= 5:
         raise HTTPException(status_code=429, detail="Zu viele Versuche. Bitte 15 Minuten warten.")
     password = str(body.get("password", ""))
-    if not hmac.compare_digest(password.encode(), cfg.app_password.encode()):
-        attempts.append(time.time())
-        raise HTTPException(status_code=401, detail="Falsches Passwort")
+    if hmac.compare_digest(password.encode(), cfg.app_password.encode()):
+        who = "owner"
+    else:
+        friend = owner.friends.by_code(password)  # Freunde mit Oberfläche melden sich mit ihrem Zugangscode an
+        if friend is None:
+            attempts.append(time.time())
+            raise HTTPException(status_code=401, detail="Falsches Passwort oder falscher Zugangscode")
+        who = friend["id"]
     request.session.clear()
     request.session["auth"] = True
+    request.session["who"] = who
     request.session["since"] = int(time.time())
     return {"ok": True}
 
@@ -144,8 +191,14 @@ async def logout(request: Request) -> dict[str, Any]:
 
 @app.get("/api/me")
 async def me(request: Request) -> dict[str, Any]:
+    found = _identity(request)
+    label = None
+    if found and found[0] == "friend":
+        label = (owner.friends.entry(request.session.get("who", "")) or {}).get("label")
     return {
-        "authenticated": bool(request.session.get("auth")),
+        "authenticated": found is not None,
+        "role": found[0] if found else None,
+        "label": label,
         "demo": cfg.demo,
         "build": BUILD_ID,
         "commit": APP_COMMIT,
@@ -188,6 +241,11 @@ async def homework() -> dict[str, Any]:
 async def homework_done(hw_id: str, body: dict[str, Any]) -> dict[str, Any]:
     service.db.set_homework_done(hw_id, bool(body.get("done")))
     return {"ok": True}
+
+
+@app.get("/api/absences", dependencies=[Depends(require_auth)])
+async def absences() -> dict[str, Any]:
+    return service.absences()
 
 
 @app.get("/api/exams", dependencies=[Depends(require_auth)])
@@ -326,8 +384,9 @@ async def briefing_send(kind: str) -> dict[str, Any]:
 # ── Push ─────────────────────────────────────────────────────────────
 
 @app.get("/api/push/key")
-async def push_key() -> dict[str, Any]:
-    return {"key": service.pusher.public_key}
+async def push_key(request: Request) -> dict[str, Any]:
+    found = _identity(request)  # jedes Konto hat seinen eigenen Push-Schlüssel
+    return {"key": (found[1] if found else owner).pusher.public_key}
 
 
 @app.post("/api/push/subscribe", dependencies=[Depends(require_auth)])
@@ -368,35 +427,48 @@ def _ical_token(regenerate: bool = False) -> str:
     return token
 
 
-def _ical_links(token: str) -> dict[str, str]:
-    url = f"{cfg.public_url}/cal/{token}.ics"
+def _ical_links(token: str, termine: bool = False) -> dict[str, str]:
+    url = f"{cfg.public_url}/cal/{token}.ics" + ("?termine=1" if termine else "")
     return {"url": url, "webcal": url.replace("https://", "webcal://", 1).replace("http://", "webcal://", 1)}
 
 
 @app.get("/api/ical", dependencies=[Depends(require_auth)])
-async def ical_url() -> dict[str, Any]:
-    return _ical_links(_ical_token())
+async def ical_url(request: Request) -> dict[str, Any]:
+    if request.state.role == "friend":
+        # Der Kalender-Link eines Freundes bleibt, wie er war (ohne den getrennten Schultermine-Kalender)
+        friend = owner.friends.entry(request.session["who"])
+        return _ical_links(friend["ical_token"])
+    token = _ical_token()
+    # Der Stundenplan-Kalender enthält keine Schultermine aus dem Schulmanager-Kalender, die gibt es getrennt
+    events = _ical_links(token, termine=True)
+    return {**_ical_links(token), "events_url": events["url"], "events_webcal": events["webcal"]}
 
 
 @app.post("/api/ical/regenerate", dependencies=[Depends(require_auth)])
-async def ical_regenerate() -> dict[str, Any]:
-    _ical_token(regenerate=True)
-    return await ical_url()
+async def ical_regenerate(request: Request) -> dict[str, Any]:
+    if request.state.role == "friend":
+        owner.friends.regenerate_ical(request.session["who"])
+    else:
+        _ical_token(regenerate=True)
+    return await ical_url(request)
 
 
 @app.get("/cal/{token}.ics")
-async def ical_feed(token: str, lessons: int = 1) -> Response:
+async def ical_feed(token: str, lessons: int = 1, termine: int = 0) -> Response:
     expected = service.db.get("ical_token")
     if expected and hmac.compare_digest(token.encode(), str(expected).encode()):
-        body = ical.build(service.lessons(), service.exams(),
-                          [e for e in service.snap("calendar") if not e["is_holiday"]], cfg.tz, bool(lessons),
-                          service.own("leaves"))
+        events = [e for e in service.snap("calendar") if not e["is_holiday"]]
+        if termine:
+            # Schultermine aus dem Schulmanager-Kalender: eigener, optionaler Kalender
+            body = ical.build([], [], events, cfg.tz, False, None, "Schultermine")
+        else:
+            body = ical.build(service.lessons(), service.exams(), [], cfg.tz, bool(lessons), service.own("leaves"))
     else:
-        friend = service.friends.by_ical_token(token)
+        friend = owner.friends.by_ical_token(token)
         if friend is None:
             raise HTTPException(status_code=404)
         try:
-            body = service.friends.ical(friend, bool(lessons))
+            body = owner.friends.ical(friend, bool(lessons))
         except FriendError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     return Response(body, media_type="text/calendar; charset=utf-8",
@@ -409,9 +481,9 @@ def _friend_error(exc: FriendError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-@app.get("/api/friends", dependencies=[Depends(require_auth)])
+@app.get("/api/friends", dependencies=[Depends(require_owner)])
 async def friends_list() -> dict[str, Any]:
-    friends = service.friends
+    friends = owner.friends
     return {
         "friends": [friends.view(e) for e in friends.entries()],
         "invites": [
@@ -422,35 +494,45 @@ async def friends_list() -> dict[str, Any]:
     }
 
 
-@app.post("/api/friends/invite", dependencies=[Depends(require_auth)])
+@app.post("/api/friends/invite", dependencies=[Depends(require_owner)])
 async def friends_invite(body: dict[str, Any]) -> dict[str, Any]:
     try:
-        invite = service.friends.create_invite(body.get("label", ""))
+        invite = owner.friends.create_invite(body.get("label", ""))
     except FriendError as exc:
         raise _friend_error(exc) from exc
     return {"token": invite["token"], "label": invite["label"], "expires": invite["expires"],
             "url": f"{cfg.public_url}/einladung/{invite['token']}"}
 
 
-@app.delete("/api/friends/invite/{token}", dependencies=[Depends(require_auth)])
+@app.delete("/api/friends/invite/{token}", dependencies=[Depends(require_owner)])
 async def friends_revoke_invite(token: str) -> dict[str, Any]:
-    if not service.friends.revoke_invite(token):
+    if not owner.friends.revoke_invite(token):
         raise HTTPException(status_code=404, detail="Einladung nicht gefunden")
     return {"ok": True}
 
 
-@app.post("/api/friends/{friend_id}/sync", dependencies=[Depends(require_auth)])
+@app.post("/api/friends/{friend_id}/ui", dependencies=[Depends(require_owner)])
+async def friends_offer_ui(friend_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Besitzer bietet die Oberfläche an oder zieht sie zurück. Aktiv wird sie erst, wenn der Freund zustimmt."""
+    try:
+        await owner.friends.offer_ui(friend_id, bool(body.get("offered")))
+    except FriendError as exc:
+        raise _friend_error(exc) from exc
+    return owner.friends.view(owner.friends.entry(friend_id))
+
+
+@app.post("/api/friends/{friend_id}/sync", dependencies=[Depends(require_owner)])
 async def friends_sync(friend_id: str) -> dict[str, Any]:
     try:
-        result = await service.friends.sync_now(friend_id)
+        result = await owner.friends.sync_now(friend_id)
     except FriendError as exc:
         raise _friend_error(exc) from exc
     return {"ok": bool(result.get("ok")), "error": result.get("error")}
 
 
-@app.delete("/api/friends/{friend_id}", dependencies=[Depends(require_auth)])
+@app.delete("/api/friends/{friend_id}", dependencies=[Depends(require_owner)])
 async def friends_delete(friend_id: str) -> dict[str, Any]:
-    if not await service.friends.delete(friend_id):
+    if not await owner.friends.delete(friend_id):
         raise HTTPException(status_code=404, detail="Freund nicht gefunden")
     return {"ok": True}
 
@@ -476,7 +558,7 @@ def _guest_failed(ip: str) -> None:
 
 def _friend_for(request: Request, token: str) -> dict[str, Any]:
     ip = _guest_guard(request)
-    entry = service.friends.by_manage_token(token)
+    entry = owner.friends.by_manage_token(token)
     if entry is None:
         _guest_failed(ip)
         raise HTTPException(status_code=404, detail="Dieser Link ist ungültig.")
@@ -484,7 +566,12 @@ def _friend_for(request: Request, token: str) -> dict[str, Any]:
 
 
 def _friend_page(entry: dict[str, Any]) -> dict[str, Any]:
-    return {**service.friends.view(entry), **_ical_links(entry["ical_token"])}
+    entry = owner.friends.entry(entry["id"]) or entry
+    page = {**owner.friends.view(entry), **_ical_links(entry["ical_token"])}
+    if entry.get("ui") == "on":
+        page["code"] = owner.friends.code_of(entry)
+        page["app_url"] = f"{cfg.public_url}/"
+    return page
 
 
 GUEST_HEADERS = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
@@ -499,7 +586,7 @@ async def guest_page(token: str) -> HTMLResponse:
 @app.get("/api/invite/{token}")
 async def invite_info(request: Request, token: str) -> dict[str, Any]:
     ip = _guest_guard(request)
-    invite = service.friends.invite(token)
+    invite = owner.friends.invite(token)
     if invite is None:
         _guest_failed(ip)
         raise HTTPException(status_code=404, detail="Der Einladungslink ist ungültig oder abgelaufen.")
@@ -512,7 +599,7 @@ async def invite_redeem(request: Request, token: str, body: dict[str, Any]) -> d
     if body.get("consent") is not True:
         raise HTTPException(status_code=400, detail="Bitte stimme der Speicherung zu.")
     try:
-        entry = await service.friends.redeem(token, str(body.get("email", "")), str(body.get("password", "")))
+        entry = await owner.friends.redeem(token, str(body.get("email", "")), str(body.get("password", "")))
     except FriendError as exc:
         _guest_failed(ip)
         raise _friend_error(exc) from exc
@@ -528,30 +615,49 @@ async def friend_info(request: Request, token: str) -> dict[str, Any]:
 async def friend_login(request: Request, token: str, body: dict[str, Any]) -> dict[str, Any]:
     entry = _friend_for(request, token)
     try:
-        fresh = await service.friends.renew(entry, str(body.get("email", "")), str(body.get("password", "")))
+        fresh = await owner.friends.renew(entry, str(body.get("email", "")), str(body.get("password", "")))
     except FriendError as exc:
         _guest_failed(_client_ip(request))
         raise _friend_error(exc) from exc
     return _friend_page(fresh)
 
 
+@app.post("/api/friend/{token}/ui")
+async def friend_ui(request: Request, token: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Der Freund nimmt das Angebot der Oberfläche an, schaltet sie ab oder erzeugt einen neuen Zugangscode."""
+    entry = _friend_for(request, token)
+    action = str(body.get("action", ""))
+    try:
+        if action == "activate":
+            await owner.friends.activate_ui(entry)
+        elif action == "deactivate":
+            await owner.friends.disable_ui(entry)
+        elif action == "new-code":
+            owner.friends.regenerate_code(entry)
+        else:
+            raise HTTPException(status_code=400, detail="Unbekannte Aktion")
+    except FriendError as exc:
+        raise _friend_error(exc) from exc
+    return _friend_page(entry)
+
+
 @app.post("/api/friend/{token}/regenerate")
 async def friend_regenerate(request: Request, token: str) -> dict[str, Any]:
     entry = _friend_for(request, token)
-    service.friends.regenerate_ical(entry["id"])
-    return _friend_page(service.friends.entry(entry["id"]) or entry)
+    owner.friends.regenerate_ical(entry["id"])
+    return _friend_page(owner.friends.entry(entry["id"]) or entry)
 
 
 @app.delete("/api/friend/{token}")
 async def friend_delete(request: Request, token: str) -> dict[str, Any]:
     entry = _friend_for(request, token)
-    await service.friends.delete(entry["id"])
+    await owner.friends.delete(entry["id"])
     return {"ok": True}
 
 
 # ── Fehlersuche ──────────────────────────────────────────────────────
 
-@app.get("/api/debug/raw/{module}", dependencies=[Depends(require_auth)])
+@app.get("/api/debug/raw/{module}", dependencies=[Depends(require_owner)])
 async def debug_raw(module: str) -> Response:
     if not module.isalpha():
         raise HTTPException(status_code=400)
