@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { editCourse } from "../forms.js";
 import {
   errorState, esc, icon, inDays, longDate, minutesOf, plural, query, relativeDay,
   shortDate, skeleton, stateTag, timeAgo, toast,
@@ -250,6 +251,12 @@ function absenceNotice(data) {
   return `<a class="notice yellow reveal" href="#/aufgaben?tab=fehlzeiten" style="margin-bottom:12px;text-decoration:none">${icon("warning-circle")}<p><strong>${plural(n, "Fehlzeit", "Fehlzeiten")} noch nicht entschuldigt.</strong> Im Klassenbuch ansehen</p></a>`;
 }
 
+// Solange noch gar kein eigener Unterricht eingetragen ist, gleich dort anbieten, wo man ihn vermisst
+function courseHint(data) {
+  if (data.has_courses) return "";
+  return `<p class="muted reveal" style="margin:14px 0 0">Fehlt Unterricht, den der Schulmanager nicht kennt (z. B. ein Kurs an einer anderen Schule)? <button type="button" class="btn small" style="margin-top:8px" data-action="add-course">+ Eigenen Unterricht eintragen</button></p>`;
+}
+
 function leaveNotice(day) {
   const leaves = day.leaves || [];
   if (!leaves.length || (!day.school_day && !day.lessons.length)) return "";
@@ -325,7 +332,7 @@ export async function render(main, params, ctx) {
     ${leaveNotice(day)}
     ${breakCard(day, data)}
     ${day.lessons.length ? tiles(day, data) : ""}
-    ${day.lessons.length ? `<section class="section"><h2 class="section-title">Stunden <span class="aside">${esc(day.planned_start)}–${esc(day.planned_end)}</span></h2>${lessonList(day.lessons)}</section>` : ""}
+    ${day.lessons.length ? `<section class="section"><h2 class="section-title">Stunden <span class="aside">${esc(day.planned_start)}–${esc(day.planned_end)}</span></h2>${lessonList(day.lessons)}${courseHint(data)}</section>` : ""}
     ${evaSection(day)}
     ${examsSection(day)}
     ${homeworkSection(day)}
@@ -347,6 +354,8 @@ export async function render(main, params, ctx) {
       }
     });
   });
+
+  main.querySelector("[data-action=add-course]")?.addEventListener("click", () => editCourse(null, ctx));
 
   main.querySelector("[data-action=sync]").addEventListener("click", async (event) => {
     const button = event.currentTarget;

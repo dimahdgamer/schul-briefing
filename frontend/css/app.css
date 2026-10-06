@@ -1780,6 +1780,15 @@ kbd {
 .sheet .sheet-field input[type="time"].input {
   font-family: var(--font-mono);
 }
+.sheet-field.is-invalid .field-label {
+  color: var(--red);
+}
+.sheet-field.is-invalid .input,
+.sheet-field.is-invalid .chips {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 .sheet-error {
   margin: 0;
   padding: 10px 12px;

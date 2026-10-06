@@ -136,6 +136,7 @@ class AppService:
             "following_school_day": self.calendar.next_school_day(target).isoformat(),
             "next_exam": exams[0] if exams else None,
             "open_homework": len(open_hw),
+            "has_courses": bool(self.own("courses")),
             "unexcused_absences": int((self.db.snapshot("absences") or {}).get("unexcused_entries") or 0),
             "unread_letters": letters,
             "unread_messages": messages,
@@ -181,7 +182,8 @@ class AppService:
                 "exams": [e for e in exams if e["date"] == iso],
                 "events": [e for e in events if not e["is_holiday"] and e["start"][:10] <= iso <= (e["end"] or e["start"])[:10]],
             })
-        return {"monday": monday.isoformat(), "days": days, "source": source, "today": self.today().isoformat()}
+        return {"monday": monday.isoformat(), "days": days, "source": source, "today": self.today().isoformat(),
+                "has_courses": bool(self.own("courses"))}
 
     # ── Briefing ─────────────────────────────────────────────────────
 

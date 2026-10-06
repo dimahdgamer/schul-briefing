@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { editCourse } from "../forms.js";
 import { addDays, errorState, esc, icon, isoWeek, mondayOf, query, skeleton } from "../ui.js";
 
 export const title = "Woche";
@@ -63,7 +64,8 @@ export async function render(main, params, ctx) {
       <p class="lede">${changes ? `${changes} ${changes === 1 ? "Änderung" : "Änderungen"} gegenüber dem regulären Plan.` : "Keine Änderungen gegenüber dem regulären Plan."}</p>
     </header>
     <div class="week">${data.days.map((d, i) => dayColumn(d, data.today, i)).join("")}</div>
-    <p class="muted" style="margin-top:22px">Fehlt Unterricht, den der Schulmanager nicht kennt? <a href="#/einstellungen">Unter „Eigener Unterricht“ eintragen</a>.</p>`;
+    ${data.has_courses ? "" : `<p class="muted" style="margin-top:22px">Fehlt Unterricht, den der Schulmanager nicht kennt (z. B. ein Kurs an einer anderen Schule)? <button type="button" class="btn small" style="margin-top:8px" data-action="add-course">+ Eigenen Unterricht eintragen</button></p>`}`;
+  main.querySelector("[data-action=add-course]")?.addEventListener("click", () => editCourse(null, ctx));
 
   if (monday === thisMonday && window.matchMedia("(max-width: 959px)").matches) {
     const today = main.querySelector(`#d-${CSS.escape(data.today)}`);

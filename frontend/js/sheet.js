@@ -48,8 +48,8 @@ export function openSheet({ title, fields, values = {}, submitLabel = "Speichern
         <h2 id="sheet-title">${esc(title)}</h2>
         <button type="button" class="btn ghost small" data-sheet="close">Abbrechen</button>
       </header>
-      <div class="sheet-grid">${fields.map((field) => fieldHtml(field, values[field.name])).join("")}</div>
       <p class="sheet-error" role="alert" hidden></p>
+      <div class="sheet-grid">${fields.map((field) => fieldHtml(field, values[field.name])).join("")}</div>
       <div class="sheet-actions">
         ${onDelete ? '<button type="button" class="btn small" data-sheet="delete">Löschen</button>' : "<span></span>"}
         <button type="submit" class="btn primary">${esc(submitLabel)}</button>
@@ -74,9 +74,15 @@ export function openSheet({ title, fields, values = {}, submitLabel = "Speichern
   const set = (name, value) => {
     form.elements[name].value = value;
   };
-  const show = (message) => {
+  // Die Meldung steht oben im Fenster. Auf dem Handy liegt sie sonst leicht außerhalb des sichtbaren Bereichs,
+  // dann sieht es aus, als hätte das Speichern geklappt. Deshalb nach oben scrollen und das Feld markieren.
+  const show = (message, fieldName) => {
     error.textContent = message;
     error.hidden = false;
+    dialog.querySelectorAll(".is-invalid").forEach((el) => el.classList.remove("is-invalid"));
+    const field = fieldName && dialog.querySelector(`[data-field="${fieldName}"]`);
+    if (field) field.classList.add("is-invalid");
+    dialog.scrollTo({ top: 0, behavior: "smooth" });
   };
   // Direkt entfernen, statt aufs close-Ereignis zu warten (das kommt erst in einer späteren Aufgabe)
   const closeSheet = () => {
@@ -97,6 +103,7 @@ export function openSheet({ title, fields, values = {}, submitLabel = "Speichern
   };
 
   form.addEventListener("input", (event) => {
+    event.target.closest?.(".is-invalid")?.classList.remove("is-invalid");
     if (onChange && event.target.name) onChange({ name: event.target.name, values: raw(), set });
     sync();
   });
@@ -114,7 +121,7 @@ export function openSheet({ title, fields, values = {}, submitLabel = "Speichern
     event.preventDefault();
     const values = read();
     const missing = fields.find((f) => f.required && !values[f.name]);
-    if (missing) return show(`${missing.label} fehlt.`);
+    if (missing) return show(`${missing.label} fehlt.`, missing.name);
     run(event.submitter || form.querySelector("[type=submit]"), () => onSubmit(values));
   });
   dialog.querySelector('[data-sheet="close"]').addEventListener("click", closeSheet);

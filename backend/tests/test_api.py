@@ -301,6 +301,17 @@ def test_course_crud(client):
     assert http.get("/api/own").json()["courses"] == []
 
 
+def test_overview_and_week_say_whether_own_lessons_exist(client):
+    """Heute und Woche bieten das Eintragen an, solange noch kein eigener Unterricht da ist."""
+    http, _ = client
+    http.post("/api/login", json={"password": "geheim"})
+    assert http.get("/api/overview").json()["has_courses"] is False
+    assert http.get("/api/week").json()["has_courses"] is False
+    http.post("/api/own/courses", json=COURSE)
+    assert http.get("/api/overview").json()["has_courses"] is True
+    assert http.get("/api/week").json()["has_courses"] is True
+
+
 def test_course_shows_in_day_and_week_and_follows_leave(client):
     http, main = client
     http.post("/api/login", json={"password": "geheim"})
