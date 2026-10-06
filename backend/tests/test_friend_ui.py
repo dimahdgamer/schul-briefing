@@ -282,7 +282,9 @@ def test_friends_with_interface_run_in_the_scheduler_not_in_the_calendar_poll(re
     asyncio.run(friends.poll_due(True))
     assert FakeSchulmanager.requested == []  # Freunde mit Oberfläche ruft nur der Taktgeber ab
 
-    main.scheduler._last_poll[fid] = 0.0
+    # Zuletzt "vor langer Zeit" abgerufen. Nicht 0.0: monotonic() zählt ab Rechnerstart, und ein frisch
+    # gestarteter Rechner (z. B. bei GitHub Actions) läuft erst wenige Minuten
+    main.scheduler._last_poll[fid] = -1e9
     now = datetime(2026, 10, 13, 12, 0, tzinfo=main.cfg.tz)
     asyncio.run(main.scheduler.tick(now))
     assert FakeSchulmanager.requested.count("get-actual-lessons") == 1
