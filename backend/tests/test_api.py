@@ -290,6 +290,9 @@ def test_course_crud(client):
     item = created.json()
     listed = http.get("/api/own").json()["courses"]
     assert listed[0]["id"] == item["id"] and listed[0]["label"] == "Do · 15:00–17:15 · 9–11. Std"
+    # Der nächste Termin ist ein Donnerstag in den nächsten Tagen (zeigt in den Einstellungen, dass der Eintrag greift)
+    assert date.fromisoformat(listed[0]["next"]).weekday() == 3
+    assert 0 <= (date.fromisoformat(listed[0]["next"]) - date.today()).days <= 7 * 20
 
     changed = http.put(f"/api/own/courses/{item['id']}", json=dict(COURSE, weekdays=[1, 3])).json()
     assert changed["weekdays"] == [1, 3]

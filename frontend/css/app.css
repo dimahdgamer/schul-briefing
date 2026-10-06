@@ -1026,15 +1026,19 @@ a.row:hover {
   cursor: pointer;
 }
 .segmented.wide {
-  display: flex;
-  flex-wrap: wrap; /* bei vier Reitern auf schmalen Handys in zwei Zeilen */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* Handy: vier Reiter gleich breit in zwei Zeilen */
   width: 100%;
 }
 .segmented.wide a {
-  flex: 1 1 auto;
-  padding: 8px 10px;
+  padding: 9px 6px;
   text-align: center;
   white-space: nowrap;
+}
+@media (min-width: 540px) {
+  .segmented.wide {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 .segmented [aria-pressed="true"],
 .segmented [aria-current="page"] {
@@ -1871,6 +1875,40 @@ kbd {
 }
 .guest-help p {
   margin: 10px 0 0;
+}
+
+/* ── Fehlzeiten ─────────────────────────────────────────────────── */
+
+.fz {
+  margin-top: 18px;
+}
+.fz > * + * {
+  margin-top: 22px;
+}
+.fz .section {
+  margin-top: 22px; /* gleicher Abstand zwischen allen Blöcken */
+}
+.fz-span {
+  margin-left: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.fz-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.fz-subjects summary {
+  padding: 14px 16px;
+  color: var(--ink);
+  font-weight: 550;
+  cursor: pointer;
+}
+.fz-table {
+  padding: 0 16px 14px;
 }
 
 /* ── Eigene Einträge in den Listen ──────────────────────────────── */

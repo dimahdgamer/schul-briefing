@@ -142,6 +142,9 @@ function coursesSection(own) {
       <div>
         <div class="field-label">${esc(c.subject)} <span class="tag">Extern</span></div>
         <div class="field-help">${esc([c.label, c.place, courseValidity(c)].filter(Boolean).join(" · "))}</div>
+        <div class="field-help">${c.next
+          ? `Nächster Termin: <strong>${esc(shortDate(c.next))}</strong>`
+          : "Kein Termin in den nächsten vier Monaten. Bitte Wochentag, Gültigkeit und Ferien prüfen."}</div>
       </div>
       <button class="btn small" data-edit-course="${esc(c.id)}">Bearbeiten</button>
     </div>`).join("");

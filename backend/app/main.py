@@ -277,7 +277,11 @@ async def own_entries() -> dict[str, Any]:
         "today": service.today().isoformat(),
         "exams": service.own("exams"),
         "leaves": service.own("leaves"),
-        "courses": [dict(c, label=own.course_label(c)) for c in service.own("courses")],
+        "courses": [
+            dict(c, label=own.course_label(c),
+                 next=own.next_course_date(c, service.today(), service.calendar.in_official_holiday))
+            for c in service.own("courses")
+        ],
         "subjects": service.subjects(),
         "hours": [{"hour": h, "start": s, "end": e} for h, (s, e) in bell.CLASS_HOURS.items()],
     }

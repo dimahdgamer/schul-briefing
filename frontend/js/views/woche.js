@@ -62,7 +62,8 @@ export async function render(main, params, ctx) {
       <h1 class="display">${monday === thisMonday ? "Diese Woche" : monday > thisMonday ? "Kommende Woche" : "Vergangene Woche"}</h1>
       <p class="lede">${changes ? `${changes} ${changes === 1 ? "Änderung" : "Änderungen"} gegenüber dem regulären Plan.` : "Keine Änderungen gegenüber dem regulären Plan."}</p>
     </header>
-    <div class="week">${data.days.map((d, i) => dayColumn(d, data.today, i)).join("")}</div>`;
+    <div class="week">${data.days.map((d, i) => dayColumn(d, data.today, i)).join("")}</div>
+    <p class="muted" style="margin-top:22px">Fehlt Unterricht, den der Schulmanager nicht kennt? <a href="#/einstellungen">Unter „Eigener Unterricht“ eintragen</a>.</p>`;
 
   if (monday === thisMonday && window.matchMedia("(max-width: 959px)").matches) {
     const today = main.querySelector(`#d-${CSS.escape(data.today)}`);

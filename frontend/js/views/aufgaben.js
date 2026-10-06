@@ -138,10 +138,10 @@ function absenceRow(a, i) {
     <li class="row reveal" style="--i:${i}">
       <span class="row-icon ${a.unexcused ? "red" : "green"}">${icon(a.unexcused ? "warning-circle" : "check")}</span>
       <div class="row-main">
-        <div class="row-title">${esc(shortDate(a.date))} <span class="muted">${esc(a.span)}</span></div>
+        <div class="row-title">${esc(shortDate(a.date))}<span class="fz-span">${esc(a.span)}</span></div>
         <div class="row-sub">${esc(a.info.join(" · "))}</div>
+        <div class="fz-tags">${a.marks.map(markTag).join("")}</div>
       </div>
-      <div class="btn-row" style="justify-content:flex-end">${a.marks.map(markTag).join("")}</div>
     </li>`;
 }
 
@@ -157,7 +157,8 @@ function absencesView(data, onlyUnexcused) {
   const totals = data.totals;
   const open = data.items.filter((a) => a.unexcused);
   const done = data.items.filter((a) => !a.unexcused);
-  const tiles = `
+  const parts = [];
+  parts.push(`
     <div class="bento reveal">
       <div class="tile">
         <span class="tile-label">Fehlstunden</span>
@@ -169,24 +170,29 @@ function absencesView(data, onlyUnexcused) {
         <span class="tile-value">${totals.unexcused}</span>
         <span class="tile-note">${data.has_list ? `${plural(data.unexcused_entries, "Eintrag", "Einträge")} offen` : "Stunden"}</span>
       </div>
-    </div>`;
-  const noList = data.has_list ? "" : `<p class="muted reveal">Die Liste der einzelnen Fehlzeiten ist bei deiner Schule nicht abrufbar, hier steht nur die Statistik.</p>`;
-  const openSection = open.length
-    ? `<section class="section"><h2 class="section-title">Noch nicht entschuldigt<span class="aside">${open.length}</span></h2>
-        <ul class="list">${open.map(absenceRow).join("")}</ul></section>`
-    : data.has_list ? `<div class="notice green reveal">${icon("check")}<p>Alle Fehlzeiten sind entschuldigt.</p></div>` : "";
-  const doneSection = !onlyUnexcused && done.length
-    ? `<section class="section"><h2 class="section-title">Entschuldigt<span class="aside">${done.length}</span></h2>
-        <ul class="list">${done.map(absenceRow).join("")}</ul></section>`
-    : "";
-  const subjects = data.by_subject.length
-    ? `<details class="guest-help"><summary>Fehlstunden nach Fach</summary>
-        <table class="data-table" style="margin-top:10px"><thead><tr><th>Fach</th><th class="num">Fehlstunden</th><th class="num">unentschuldigt</th></tr></thead>
-        <tbody>${data.by_subject.map((s) => `<tr><td>${esc(s.subject)}</td><td class="num">${s.absent} von ${s.total}</td><td class="num">${s.unexcused}</td></tr>`).join("")}</tbody></table>
-      </details>`
-    : "";
-  return `${tiles}${noList}${openSection}${doneSection}${subjects}
-    <p class="muted" style="margin-top:18px">Stand ${esc(timeAgo(data.fetched_at))}, laut Klassenbuch im Schulmanager.</p>`;
+    </div>`);
+  if (!data.has_list) {
+    parts.push(`<p class="muted reveal">Die Liste der einzelnen Fehlzeiten ist bei deiner Schule nicht abrufbar, hier steht nur die Statistik.</p>`);
+  } else if (open.length) {
+    parts.push(`<section class="section"><h2 class="section-title">Noch nicht entschuldigt<span class="aside">${open.length}</span></h2>
+      <ul class="list">${open.map(absenceRow).join("")}</ul></section>`);
+  } else {
+    parts.push(`<div class="notice green reveal">${icon("check")}<p>Alle Fehlzeiten sind entschuldigt.</p></div>`);
+  }
+  if (!onlyUnexcused && done.length) {
+    parts.push(`<section class="section"><h2 class="section-title">Entschuldigt<span class="aside">${done.length}</span></h2>
+      <ul class="list">${done.map(absenceRow).join("")}</ul></section>`);
+  }
+  if (data.by_subject.length) {
+    parts.push(`
+      <details class="card fz-subjects">
+        <summary>Fehlstunden nach Fach</summary>
+        <div class="fz-table"><table class="data-table"><thead><tr><th>Fach</th><th class="num">Fehlstunden</th><th class="num">unentschuldigt</th></tr></thead>
+          <tbody>${data.by_subject.map((s) => `<tr><td>${esc(s.subject)}</td><td class="num">${s.absent} von ${s.total}</td><td class="num">${s.unexcused}</td></tr>`).join("")}</tbody></table></div>
+      </details>`);
+  }
+  parts.push(`<p class="muted">Stand ${esc(timeAgo(data.fetched_at))}, laut Klassenbuch im Schulmanager.</p>`);
+  return `<div class="fz">${parts.join("")}</div>`;
 }
 
 // ── Eingabe ──────────────────────────────────────────────────────────
@@ -320,7 +326,10 @@ export async function render(main, params, ctx) {
     klausuren: `<button class="btn small" data-action="add-exam">+ Klausur eintragen</button>`,
     beurlaubung: `<button class="btn small" data-action="add-leave">+ Beurlaubung eintragen</button>`,
     fehlzeiten: data.available && data.has_list
-      ? `<button class="btn ghost small" data-action="toggle-unexcused" aria-pressed="${onlyUnexcused}">${onlyUnexcused ? "Auch entschuldigte zeigen" : "Nur unentschuldigte"}</button>`
+      ? `<div class="segmented" role="group" aria-label="Anzeige">
+          <button type="button" data-filter="all" aria-pressed="${!onlyUnexcused}">Alle</button>
+          <button type="button" data-filter="open" aria-pressed="${onlyUnexcused}">Nur offene</button>
+        </div>`
       : "",
   };
   const body = {
@@ -339,16 +348,18 @@ export async function render(main, params, ctx) {
         ${TABS.map((t) => `<a href="#/aufgaben${t === "hausaufgaben" ? "" : query({ tab: t })}" ${tab === t ? 'aria-current="page"' : ""}>${LABELS[t]}</a>`).join("")}
       </div>
     </div>
-    <div class="btn-row reveal" style="margin-bottom:6px">${actions[tab]}</div>
+    ${actions[tab] ? `<div class="btn-row reveal" style="margin:14px 0 6px">${actions[tab]}</div>` : ""}
     <div id="list">${body}</div>`;
 
   main.querySelector("[data-action=toggle-done]")?.addEventListener("click", () => {
     writePref("hideDone", !hideDone);
     ctx.rerender();
   });
-  main.querySelector("[data-action=toggle-unexcused]")?.addEventListener("click", () => {
-    writePref("onlyUnexcused", !onlyUnexcused);
-    ctx.rerender();
+  main.querySelectorAll("[data-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      writePref("onlyUnexcused", button.dataset.filter === "open");
+      ctx.rerender();
+    });
   });
   main.querySelector("[data-action=add-exam]")?.addEventListener("click", () => editExam(null, ctx));
   main.querySelector("[data-action=add-leave]")?.addEventListener("click", () => editLeave(null, ctx));

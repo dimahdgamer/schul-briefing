@@ -263,6 +263,14 @@ def mark_leave(lessons: list[dict[str, Any]], leaves: list[dict[str, Any]]) -> l
     ]
 
 
+def next_course_date(
+    course: dict[str, Any], today: date, is_off: Callable[[date], bool], horizon: int = 120
+) -> str | None:
+    """Der nächste Termin eines wiederkehrenden Unterrichts ab heute, None wenn keiner in Sicht ist."""
+    found = course_lessons([course], today, today + timedelta(days=horizon), is_off)
+    return found[0]["date"] if found else None
+
+
 def course_label(course: dict[str, Any]) -> str:
     """'Do · 15:00–17:15 · 9–11. Std', für die Liste in den Einstellungen."""
     days = ", ".join(WEEKDAY_NAMES[d] for d in course["weekdays"])

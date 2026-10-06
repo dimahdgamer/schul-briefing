@@ -622,6 +622,16 @@ def test_course_input_validation():
             own.clean_course(bad)
 
 
+def test_next_course_date_skips_holidays_and_respects_validity(calendar):
+    off = calendar.in_official_holiday  # Herbstferien 17.-31.10.
+    assert own.next_course_date(russian(), date(2026, 10, 6), off) == "2026-10-08"  # nächster Donnerstag
+    assert own.next_course_date(russian(), date(2026, 10, 8), off) == "2026-10-08"  # heute zählt mit
+    assert own.next_course_date(russian(), date(2026, 10, 9), off) == "2026-10-15"
+    assert own.next_course_date(russian(), date(2026, 10, 16), off) == "2026-11-05"  # Ferien übersprungen
+    assert own.next_course_date(russian(**{"to": "2026-10-01"}), date(2026, 10, 6), off) is None  # abgelaufen
+    assert own.next_course_date(russian(), date(2026, 10, 6), lambda d: True) is None  # immer frei
+
+
 def test_course_label():
     assert own.course_label(russian()) == "Do · 15:00–17:15 · 9–11. Std"
     assert own.course_label(russian(weekdays=[0, 2], start="19:00", end="20:00")) == "Mo, Mi · 19:00–20:00"
