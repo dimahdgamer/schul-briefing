@@ -51,6 +51,8 @@
   --green: #346538;
   --yellow-bg: #fbf3db;
   --yellow: #956400;
+  --violet-bg: #f0ebf9;
+  --violet: #5b3f94;
 
   --font-sans: "Geist", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
   --font-serif: "Instrument Serif", "Newsreader", Georgia, serif;
@@ -89,6 +91,8 @@
     --green: #a3d0a7;
     --yellow-bg: rgba(214, 167, 60, 0.16);
     --yellow: #e8c66f;
+    --violet-bg: rgba(150, 120, 214, 0.18);
+    --violet: #c5b2ee;
   }
 }
 :root[data-theme="dark"] {
@@ -114,6 +118,8 @@
   --green: #a3d0a7;
   --yellow-bg: rgba(214, 167, 60, 0.16);
   --yellow: #e8c66f;
+  --violet-bg: rgba(150, 120, 214, 0.18);
+  --violet: #c5b2ee;
 }
 
 /* ── Grundlagen ─────────────────────────────────────────────────── */
@@ -653,6 +659,10 @@ button.card:hover {
   background: var(--yellow-bg);
   color: var(--yellow);
 }
+.tag.violet {
+  background: var(--violet-bg);
+  color: var(--violet);
+}
 
 /* ── Stundenliste ───────────────────────────────────────────────── */
 
@@ -722,8 +732,12 @@ button.card:hover {
   text-decoration: line-through;
   text-decoration-thickness: 1px;
 }
-.lesson.is-cancelled .lesson-hour {
+.lesson.is-cancelled .lesson-hour,
+.lesson.is-eva .lesson-hour {
   color: var(--faint);
+}
+.lesson.is-eva .lesson-subject {
+  color: var(--muted);
 }
 .lesson::before {
   content: "";
@@ -742,6 +756,10 @@ button.card:hover {
 .lesson.is-substitution::before {
   background: var(--yellow);
   opacity: 0.7;
+}
+.lesson.is-eva::before {
+  background: var(--violet);
+  opacity: 0.6;
 }
 .lesson.is-room-change::before,
 .lesson.is-extra::before {
@@ -861,6 +879,10 @@ a.row:hover {
 .row-icon.yellow {
   background: var(--yellow-bg);
   color: var(--yellow);
+}
+.row-icon.violet {
+  background: var(--violet-bg);
+  color: var(--violet);
 }
 .unread-dot {
   display: inline-block;
@@ -1312,6 +1334,12 @@ kbd {
 }
 .mini li.is-substitution {
   background: var(--yellow-bg);
+}
+.mini li.is-eva {
+  background: var(--violet-bg);
+}
+.mini li.is-eva .s {
+  color: var(--muted);
 }
 .mini li.is-room-change,
 .mini li.is-extra {

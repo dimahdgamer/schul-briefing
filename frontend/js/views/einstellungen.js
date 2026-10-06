@@ -6,7 +6,7 @@ import { LOADED_BUILD, hardReload } from "../version.js";
 export const title = "Einstellungen";
 
 const NOTIFY = [
-  ["notify_lessons", "Stundenplan", "Entfall, Vertretung, Raumänderung"],
+  ["notify_lessons", "Stundenplan", "Entfall, EVA, Vertretung, Raumänderung"],
   ["notify_exams", "Klassenarbeiten", "Neu eingetragen, verschoben, entfernt"],
   ["notify_homework", "Hausaufgaben", "Neu eingetragene Aufgaben"],
   ["notify_letters", "Elternbriefe", "Neue Briefe der Schule"],

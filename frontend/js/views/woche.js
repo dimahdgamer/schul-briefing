@@ -18,7 +18,7 @@ function dayColumn(day, todayIso, index) {
     const events = day.events.map((ev) => `
       <li><span class="h">${icon("calendar-dots", "sm")}</span><span class="s">${esc(ev.title)}</span><span class="r">${ev.all_day ? "" : esc(ev.start.slice(11, 16))}</span></li>`).join("");
     const lessons = day.lessons.map((l) => {
-      const label = l.state === "cancelled" ? "Entfall" : l.state === "substitution" ? `Vertr. ${l.teacher || ""}` : l.room;
+      const label = l.state === "cancelled" ? "Entfall" : l.state === "eva" ? "EVA" : l.state === "substitution" ? `Vertr. ${l.teacher || ""}` : l.room;
       return `<li class="is-${esc(l.state)}" title="${esc([l.subject, l.teacher, l.room].filter(Boolean).join(" · "))}">
         <span class="h">${esc(l.hour)}</span><span class="s">${esc(l.subject)}</span><span class="r">${esc(label || "")}</span></li>`;
     }).join("");

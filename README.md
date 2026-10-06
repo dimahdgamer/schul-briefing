@@ -15,16 +15,17 @@ ein Briefing. Läuft im Docker-Container auf dem Raspberry Pi unter
 
 | Bereich | Was passiert |
 |---|---|
-| **Morgen-Briefing** | Push nur an Schultagen. Die Uhrzeit richtet sich nach der ersten planmäßigen Stunde (1. Stunde 07:00, 2. Stunde 07:20, 3. Stunde 08:00, einstellbar), ohne Unterricht gilt eine feste Uhrzeit. Inhalt: Beginn und Schluss, Ausfälle („Später los: Beginn 08:50“), Vertretungen, fällige Hausaufgaben, nächste Klassenarbeit, ungelesene Post. |
+| **Morgen-Briefing** | Push nur an Schultagen. Die Uhrzeit richtet sich nach der ersten planmäßigen Stunde (1. Stunde 07:00, 2. Stunde 07:20, 3. Stunde 08:00, einstellbar), ohne Unterricht gilt eine feste Uhrzeit. Inhalt: Beginn und Schluss, Ausfälle („Später los: Beginn 08:50“), EVA mit den dafür eingestellten Aufgaben, Vertretungen, fällige Hausaufgaben, nächste Klassenarbeit, ungelesene Post. |
 | **Abend-Vorschau** | Optional, am Vorabend eines Schultags (auch Sonntagabend). |
-| **Sofort-Meldungen** | Entfall, Vertretung, Raumänderung, „findet doch statt“, neue Hausaufgabe, Klassenarbeit neu/verschoben/entfernt, neuer Elternbrief, neue Nachricht, neuer Schultermin. Jede Kategorie lässt sich einzeln abschalten. Viele Änderungen auf einmal kommen als eine Sammelnachricht. |
+| **Sofort-Meldungen** | Entfall, EVA, Vertretung, Raumänderung, „findet doch statt“, neue Hausaufgabe (bei EVA als „EVA-Aufgabe“), Klassenarbeit neu/verschoben/entfernt, neuer Elternbrief, neue Nachricht, neuer Schultermin. Jede Kategorie lässt sich einzeln abschalten. Viele Änderungen auf einmal kommen als eine Sammelnachricht. |
 | **Klausur-Erinnerungen** | z. B. 7, 3 und 1 Tag vorher, Uhrzeit einstellbar. |
 | **Heute** | Zeitleiste der Stunden mit laufender Stunde, Pausen und Freistunden, Kacheln für Beginn, Schluss, Änderungen, Hausaufgaben und nächste Arbeit. Nach Schulschluss springt die Ansicht auf den nächsten Schultag. |
 | **Woche** | Mo–Fr mit markierten Änderungen, beliebige Wochen vor und zurück. |
 | **Aufgaben** | Hausaufgaben nach Fälligkeit (nächste Stunde im jeweiligen Fach) mit Abhaken (nur lokal), Klassenarbeiten mit Countdown. |
+| **EVA** | Eigenverantwortliches Arbeiten führt Schulmanager als Vertretung mit Raum „EVA“. Die App erkennt es daran und behandelt es wie Entfall (kein Weg zur Schule: Beginn, Schluss und Freistunden werden ohne EVA-Stunden berechnet). Heute und Briefing zeigen pro EVA-Stunde die Aufgaben, die in der letzten Stunde des Fachs oder am EVA-Tag selbst eingestellt wurden, oder „noch keine Aufgaben eingestellt“. Ältere Aufgaben gelten nicht als fällig. |
 | **Post** | Elternbriefe und Nachrichten, Antippen öffnet Schulmanager. |
 | **Verlauf** | Jede erkannte Änderung mit Zeitstempel. |
-| **Kalender-Abo** | iCal-Link für den Handy-Kalender: alle Stunden von letzter Woche bis vier Wochen voraus inkl. Vertretungen, Ausfällen und Raumänderungen, dazu Arbeiten und Schultermine. |
+| **Kalender-Abo** | iCal-Link für den Handy-Kalender: alle Stunden von letzter Woche bis vier Wochen voraus inkl. Vertretungen, Ausfällen, EVA und Raumänderungen, dazu Arbeiten und Schultermine. |
 | **Ferien** | NRW-Ferien und Feiertage (OpenHolidays API) plus schulfreie Tage aus dem Schulkalender. In den Ferien gibt es kein Briefing, und es wird seltener abgefragt. |
 | **Offline** | Die zuletzt geladenen Daten bleiben ohne Netz sichtbar. |
 

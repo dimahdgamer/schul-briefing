@@ -122,9 +122,11 @@ class DemoSource:
         plan = WEEK[d.weekday()]
         hour = rng.randint(1, len(plan))
         key = f"{d.isoformat()}#{hour}"
-        kind = rng.choice(["cancelled", "cancelled", "substitution", "room"])
+        kind = rng.choice(["cancelled", "cancelled", "substitution", "room", "eva"])
         if kind == "cancelled":
             state["overrides"][key] = {"type": "cancelled"}
+        elif kind == "eva":
+            state["overrides"][key] = {"type": "eva"}
         elif kind == "substitution":
             code = rng.choice([c for c in SUBJECTS if c != plan[hour - 1]])
             state["overrides"][key] = {"type": "substitution", "subject": code, "teacher": rng.choice(SUBSTITUTES)}
@@ -227,6 +229,11 @@ class DemoSource:
                         if override["type"] == "cancelled":
                             item["actualLesson"] = None
                             item["isCancelled"] = True
+                        elif override["type"] == "eva":
+                            # So führt Schulmanager EVA: gleiches Fach und gleiche Lehrkraft, Raum "EVA"
+                            item["comment"] = "Eigenverantwortliches Arbeiten"
+                            item["actualLesson"] = dict(regular, room={"name": "EVA"},
+                                                        comment="Eigenverantwortliches Arbeiten")
                         elif override["type"] == "substitution":
                             s_name, s_abbr, _t, s_room = SUBJECTS[override["subject"]]
                             item["actualLesson"] = {"subject": {"name": s_name, "abbreviation": s_abbr}, "subjectLabel": f"{s_abbr} G1",

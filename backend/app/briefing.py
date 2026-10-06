@@ -5,8 +5,38 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from . import fmt
+from . import fmt, normalize
 from .holidays import SchoolCalendar
+
+
+def _free(lesson: dict[str, Any]) -> bool:
+    """Entfall und EVA: Man muss für diese Stunde nicht in der Schule sein."""
+    return lesson["state"] in ("cancelled", "eva")
+
+
+def _eva_entries(
+    day_lessons: list[dict[str, Any]], hw_due: list[dict[str, Any]], done_ids: set[str]
+) -> list[dict[str, Any]]:
+    """Pro EVA-Fach: Stunde(n) und die dafür fälligen Aufgaben (nur die der letzten Stunde, nichts Älteres)."""
+    entries: dict[str, dict[str, Any]] = {}
+    for lesson in day_lessons:
+        if lesson["state"] != "eva":
+            continue
+        entry = entries.setdefault(
+            lesson["subject"], {"subject": lesson["subject"], "hours": [], "keys": set(), "tasks": []}
+        )
+        entry["hours"].append(lesson["hour"])
+        entry["keys"] |= normalize.subject_keys(lesson["subject"], lesson.get("abbr", ""))
+    out = []
+    for entry in entries.values():
+        tasks = [
+            dict(h, done=h["id"] in done_ids)
+            for h in hw_due
+            if h.get("eva") and normalize.subject_keys(h["subject"]) & entry["keys"]
+        ]
+        hours = [h for h in entry["hours"] if h]
+        out.append({"subject": entry["subject"], "hour": "/".join(hours), "tasks": tasks})
+    return out
 
 
 def day_summary(
@@ -20,7 +50,7 @@ def day_summary(
 ) -> dict[str, Any]:
     iso = day.isoformat()
     day_lessons = [l for l in lessons if l["date"] == iso]
-    active = [l for l in day_lessons if l["state"] != "cancelled"]
+    active = [l for l in day_lessons if not _free(l)]
     planned_start = min((l["start"] for l in day_lessons if l["start"]), default="")
     planned_end = max((l["end"] for l in day_lessons if l["end"]), default="")
     start = min((l["start"] for l in active if l["start"]), default="")
@@ -47,7 +77,9 @@ def day_summary(
         "late_start": bool(start and planned_start and start > planned_start),
         "early_end": bool(end and planned_end and end < planned_end),
         "first_lesson": first_active,
-        "all_cancelled": bool(day_lessons) and not active,
+        "all_cancelled": bool(day_lessons) and not active,  # nichts, wofür man hin muss (Entfall oder EVA)
+        "has_eva": any(l["state"] == "eva" for l in day_lessons),
+        "eva": _eva_entries(day_lessons, hw_due, done_ids),
         "changes": [l for l in day_lessons if l["state"] != "regular"],
         "homework_due": [dict(h, done=h["id"] in done_ids) for h in hw_due],
         "exams_today": [e for e in exams if e["date"] == iso],
@@ -65,11 +97,31 @@ def _change_line(lesson: dict[str, Any]) -> str:
         what = f"{orig} → {lesson['subject']}" if orig and orig != lesson["subject"] else lesson["subject"]
         extra = f" ({lesson['room']})" if lesson.get("room") else ""
         return f"{prefix}Vertretung {what}{extra}"
+    if lesson["state"] == "eva":
+        return f"{prefix}{lesson['subject']} als EVA"
     if lesson["state"] == "room-change":
         return f"{prefix}{lesson['subject']} in {lesson['room']}"
     if lesson["state"] == "extra":
         return f"{prefix}zusätzlich {lesson['subject']}"
     return f"{prefix}{lesson['subject']}"
+
+
+def _shorten(text: str, limit: int = 70) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _eva_line(entry: dict[str, Any]) -> str:
+    head = f"{entry['hour']}. Std " if entry["hour"] else ""
+    head += f"{entry['subject']}: EVA"
+    tasks = entry["tasks"]
+    if not tasks:
+        return head + ", noch keine Aufgaben eingestellt"
+    open_tasks = [t for t in tasks if not t.get("done")]
+    if not open_tasks:
+        return head + ", Aufgaben erledigt"
+    line = head + ", Aufgaben: " + "; ".join(_shorten(t["text"]) for t in open_tasks[:2])
+    return line + (f" (+{len(open_tasks) - 2})" if len(open_tasks) > 2 else "")
 
 
 def build_push(
@@ -87,7 +139,10 @@ def build_push(
     if not summary["lessons"]:
         title = f"{prefix}: kein Unterricht eingetragen"
     elif summary["all_cancelled"]:
-        title = f"{prefix}: Der gesamte Unterricht fällt aus"
+        title = (
+            f"{prefix}: Kein Unterricht vor Ort (EVA)" if summary["has_eva"]
+            else f"{prefix}: Der gesamte Unterricht fällt aus"
+        )
     else:
         title = f"{prefix} {summary['start']}–{summary['end']} Uhr"
         n = len(summary["changes"])
@@ -100,17 +155,20 @@ def build_push(
     if summary["early_end"]:
         lines.append(f"Früher Schluss um {summary['end']}")
 
-    change_lines = [_change_line(l) for l in summary["changes"]]
+    change_lines = [_change_line(l) for l in summary["changes"] if l["state"] != "eva"]
     if len(change_lines) > 3:
         lines.extend(change_lines[:3])
         lines.append(f"+ {len(change_lines) - 3} weitere Änderungen")
     else:
         lines.extend(change_lines)
 
+    lines.extend(_eva_line(entry) for entry in summary["eva"])
+
     for exam in summary["exams_today"]:
         lines.append(f"{exam['type']} {prefix.lower()}: {exam['subject']}")
 
-    open_hw = [h for h in summary["homework_due"] if not h.get("done")]
+    eva_ids = {t["id"] for entry in summary["eva"] for t in entry["tasks"]}
+    open_hw = [h for h in summary["homework_due"] if not h.get("done") and h["id"] not in eva_ids]
     if open_hw:
         lines.append("Hausaufgaben fällig: " + fmt.join_de(sorted({h["subject"] for h in open_hw})))
 

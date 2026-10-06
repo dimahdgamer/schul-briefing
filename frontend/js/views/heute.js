@@ -16,10 +16,13 @@ function lede(day, data) {
     if (!day.in_window) return "Für diesen Tag liegen noch keine Stundenplandaten vor.";
     return "Für diesen Tag ist kein Unterricht eingetragen.";
   }
-  if (day.all_cancelled) return "Der gesamte Unterricht fällt aus.";
+  if (day.all_cancelled) {
+    return day.has_eva ? "Nur EVA oder Entfall, du musst nicht in die Schule." : "Der gesamte Unterricht fällt aus.";
+  }
   const parts = [];
   if (day.late_start && day.first_lesson) {
-    parts.push(`Die ersten Stunden fallen aus, du musst erst um <span class="mono">${esc(day.start)}</span> da sein.`);
+    const out = day.has_eva ? "fallen aus oder sind EVA" : "fallen aus";
+    parts.push(`Die ersten Stunden ${out}, du musst erst um <span class="mono">${esc(day.start)}</span> da sein.`);
   } else {
     parts.push(`Unterricht von <span class="mono">${esc(day.start)}</span> bis <span class="mono">${esc(day.end)}</span> Uhr.`);
   }
@@ -56,23 +59,26 @@ function lessonRow(lesson, index) {
     </li>`;
 }
 
+// Entfall und EVA: dafür muss man nicht in der Schule sein
+const isFree = (lesson) => lesson.state === "cancelled" || lesson.state === "eva";
+
 function lessonList(lessons) {
   const rows = [];
   let previousEnd = null;
   lessons.forEach((lesson, i) => {
     const start = minutesOf(lesson.start);
-    if (previousEnd !== null && start !== null && start - previousEnd >= 15 && lesson.state !== "cancelled") {
+    if (previousEnd !== null && start !== null && start - previousEnd >= 15 && !isFree(lesson)) {
       const gap = start - previousEnd;
       rows.push(`<li class="gap-row" aria-hidden="true">${gap > 30 ? "Freistunde" : "Pause"} · ${gap} Min.</li>`);
     }
     rows.push(lessonRow(lesson, i));
-    if (lesson.state !== "cancelled" && lesson.end) previousEnd = minutesOf(lesson.end);
+    if (!isFree(lesson) && lesson.end) previousEnd = minutesOf(lesson.end);
   });
   return `<ol class="lessons" aria-label="Stunden">${rows.join("")}</ol>`;
 }
 
 function tiles(day, data) {
-  const active = day.lessons.filter((l) => l.state !== "cancelled");
+  const active = day.lessons.filter((l) => !isFree(l));
   const startNote = day.late_start
     ? `statt ${esc(day.planned_start)}`
     : day.first_lesson
@@ -113,16 +119,45 @@ function tiles(day, data) {
     </div>`;
 }
 
-function homeworkSection(day) {
-  if (!day.homework_due.length) return "";
-  const items = day.homework_due.map((h) => `
+function taskRow(h, tag = "") {
+  return `
     <li class="row ${h.done ? "is-done" : ""}">
       <input type="checkbox" class="check" data-hw="${esc(h.id)}" ${h.done ? "checked" : ""} aria-label="${esc(h.subject)} erledigt" />
       <div class="row-main">
-        <div class="row-title">${esc(h.subject)}</div>
+        <div class="row-title">${esc(h.subject)}${tag}</div>
         <div class="row-text">${esc(h.text)}</div>
       </div>
-    </li>`).join("");
+    </li>`;
+}
+
+// Pro EVA-Stunde: die Aufgaben der letzten Stunde (nichts Älteres) oder der Hinweis, dass noch keine da sind
+function evaSection(day) {
+  const entries = day.eva || [];
+  if (!entries.length) return "";
+  const rows = entries.map((entry) => {
+    const tag = ` <span class="tag violet">${entry.hour ? `${esc(entry.hour)}. Std` : "EVA"}</span>`;
+    if (entry.tasks.length) return entry.tasks.map((task) => taskRow(task, tag)).join("");
+    return `
+      <li class="row">
+        <span class="row-icon violet">${icon("notebook")}</span>
+        <div class="row-main">
+          <div class="row-title">${esc(entry.subject)}${tag}</div>
+          <div class="row-sub">Noch keine Aufgaben eingestellt</div>
+        </div>
+      </li>`;
+  }).join("");
+  return `
+    <section class="section reveal" style="--i:5">
+      <h2 class="section-title">EVA-Aufgaben <a class="aside" href="#/aufgaben">alle</a></h2>
+      <ul class="list">${rows}</ul>
+    </section>`;
+}
+
+function homeworkSection(day) {
+  const evaIds = new Set((day.eva || []).flatMap((entry) => entry.tasks.map((task) => task.id)));
+  const due = day.homework_due.filter((h) => !evaIds.has(h.id));
+  if (!due.length) return "";
+  const items = due.map((h) => taskRow(h)).join("");
   return `
     <section class="section reveal" style="--i:6">
       <h2 class="section-title">Hausaufgaben für diesen Tag <a class="aside" href="#/aufgaben">alle</a></h2>
@@ -208,7 +243,8 @@ function updateNow(main, dayIso) {
   main.querySelectorAll(".lesson").forEach((el) => {
     const start = minutesOf(el.dataset.start);
     const end = minutesOf(el.dataset.end);
-    const isNow = dayIso === todayIso && start !== null && end !== null && minutes >= start && minutes < end && !el.classList.contains("is-cancelled");
+    const isNow = dayIso === todayIso && start !== null && end !== null && minutes >= start && minutes < end
+      && !el.classList.contains("is-cancelled") && !el.classList.contains("is-eva");
     el.classList.toggle("is-now", isNow);
     const bar = el.querySelector(".now-progress");
     if (!bar) return;
@@ -265,6 +301,7 @@ export async function render(main, params, ctx) {
     ${breakCard(day, data)}
     ${day.lessons.length ? tiles(day, data) : ""}
     ${day.lessons.length ? `<section class="section"><h2 class="section-title">Stunden <span class="aside">${esc(day.planned_start)}–${esc(day.planned_end)}</span></h2>${lessonList(day.lessons)}</section>` : ""}
+    ${evaSection(day)}
     ${examsSection(day)}
     ${homeworkSection(day)}
     ${eventsSection(day)}

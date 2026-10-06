@@ -55,6 +55,22 @@ def _hour_sort(hour: str) -> float:
     return float(match.group(1)) if match else 99.0
 
 
+def _is_eva(room: str, *comments: Any) -> bool:
+    """EVA (Eigenverantwortliches Arbeiten) führt Schulmanager als Vertretung: gleiches Fach,
+    gleiche Lehrkraft, aber Raum "EVA" und Kommentar "Eigenverantwortliches Arbeiten".
+    Ein bloßes "eva" im Kommentar reicht nicht, das kann auch ein Vorname sein."""
+    if room.strip().casefold() == "eva":
+        return True
+    texts = [_s(c).casefold() for c in comments]
+    return any("eigenverantwortlich" in t or t.strip(" .:!") == "eva" for t in texts)
+
+
+def _is_plain_eva_text(comment: str) -> bool:
+    return re.sub(r"[\s.:!]+$", "", comment.casefold()) in {
+        "eva", "eigenverantwortliches arbeiten", "eigenverantwortlich arbeiten",
+    }
+
+
 # ── Stundenplan ──────────────────────────────────────────────────────
 
 
@@ -90,6 +106,9 @@ def lessons(raw: Any) -> list[dict[str, Any]]:
         )
         if cancelled:
             state = "cancelled"
+        elif _is_eva(room, item.get("comment"), (actual or {}).get("comment")):
+            # Vor Raum- und Vertretungsprüfung: sonst wirkt der Raum "EVA" wie ein Raumwechsel
+            state = "eva"
         elif subject_changed or teacher_changed:
             state = "substitution"
         elif room_changed:
@@ -115,6 +134,12 @@ def lessons(raw: Any) -> list[dict[str, Any]]:
         if not start or not end:
             start, end = bell.times_for(hour)
 
+        comment = _s(item.get("comment")) or _s((actual or {}).get("comment"))
+        if state == "eva":
+            room = ""  # "EVA" ist kein Raum, der Zustand sagt es schon
+            if _is_plain_eva_text(comment):
+                comment = ""
+
         out.append(
             {
                 "id": lesson_id,
@@ -131,7 +156,7 @@ def lessons(raw: Any) -> list[dict[str, Any]]:
                 "original_subject": orig_subject,
                 "original_teacher": orig_teacher,
                 "original_room": orig_room,
-                "comment": _s(item.get("comment")) or _s((actual or {}).get("comment")),
+                "comment": comment,
             }
         )
     out.sort(key=lambda l: (l["date"], _hour_sort(l["hour"]), l["start"]))
@@ -141,19 +166,35 @@ def lessons(raw: Any) -> list[dict[str, Any]]:
 # ── Hausaufgaben ─────────────────────────────────────────────────────
 
 
-def _subject_keys(*names: str) -> set[str]:
+def subject_keys(*names: str) -> set[str]:
     return {re.sub(r"\s+", " ", n).strip().lower() for n in names if n}
 
 
 def lesson_days(lesson_list: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Fach -> sortierte Tage, an denen es tatsächlich stattfindet."""
+    """Fach -> sortierte Tage, an denen es tatsächlich stattfindet.
+    Eine EVA-Stunde zählt mit: Die Aufgaben der letzten Stunde sind bis dahin fällig."""
     index: dict[str, set[str]] = {}
     for lesson in lesson_list:
         if lesson["state"] == "cancelled":
             continue
-        for key in _subject_keys(lesson["subject"], lesson.get("abbr", "")):
+        for key in subject_keys(lesson["subject"], lesson.get("abbr", "")):
             index.setdefault(key, set()).add(lesson["date"])
     return {key: sorted(days) for key, days in index.items()}
+
+
+def eva_days(lesson_list: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Fach -> Tage, an denen es ausschließlich als EVA stattfindet (keine reguläre Stunde daneben)."""
+    states: dict[tuple[str, str], set[str]] = {}
+    for lesson in lesson_list:
+        if lesson["state"] == "cancelled":
+            continue
+        for key in subject_keys(lesson["subject"], lesson.get("abbr", "")):
+            states.setdefault((key, lesson["date"]), set()).add(lesson["state"])
+    index: dict[str, set[str]] = {}
+    for (key, day), found in states.items():
+        if found == {"eva"}:
+            index.setdefault(key, set()).add(day)
+    return index
 
 
 def homework(
@@ -163,10 +204,14 @@ def homework(
 ) -> list[dict[str, Any]]:
     """Schulmanager liefert das Datum, an dem die Aufgabe aufgegeben wurde.
     Fällig ist sie in der nächsten Stunde desselben Fachs. Steht das Fach nicht im
-    bekannten Stundenplan, wird der nächste Schultag angenommen."""
+    bekannten Stundenplan, wird der nächste Schultag angenommen.
+
+    Aufgaben, die an einem EVA-Tag im EVA-Fach eingestellt werden, sind EVA-Aufgaben und
+    am selben Tag fällig. `eva` markiert alle Aufgaben, die an einem EVA-Tag fällig sind."""
     if not isinstance(raw, list):
         return []
     days_by_subject = lesson_days(lesson_list)
+    eva_by_subject = eva_days(lesson_list)
     known_from = min((l["date"] for l in lesson_list), default="")
     out = []
     for item in raw:
@@ -182,8 +227,11 @@ def homework(
         assigned = _s(item.get("date"))[:10]
         due = _s(item.get("homeworkDueDate") or item.get("dueDate"))[:10]
         estimated = not due
+        keys = subject_keys(subject)
+        if not due and assigned and any(assigned in eva_by_subject.get(key, ()) for key in keys):
+            due, estimated = assigned, False
         if not due and assigned and known_from and assigned >= known_from:
-            for key in _subject_keys(subject):
+            for key in keys:
                 later = [d for d in days_by_subject.get(key, []) if d > assigned]
                 if later:
                     due, estimated = later[0], False
@@ -193,6 +241,7 @@ def homework(
                 due = next_school_day(date.fromisoformat(assigned)).isoformat()
             except ValueError:
                 due = assigned
+        eva = bool(due) and not estimated and any(due in eva_by_subject.get(key, ()) for key in keys)
         teacher = item.get("teacher") or {}
         out.append(
             {
@@ -202,6 +251,7 @@ def homework(
                 "assigned": assigned,
                 "due": due,
                 "due_estimated": estimated,
+                "eva": eva,
                 "teacher": _s(teacher.get("lastname")) if isinstance(teacher, dict) else _s(teacher),
             }
         )

@@ -42,7 +42,7 @@ function homeworkView(data, hideDone) {
         <div class="row-main">
           <div class="row-title">${esc(h.subject)}</div>
           <div class="row-text">${esc(h.text)}</div>
-          <div class="row-sub">aufgegeben ${esc(shortDate(h.assigned || h.due))}${h.teacher ? ` · ${esc(h.teacher)}` : ""}${h.due_estimated ? " · Fälligkeit geschätzt" : ""}</div>
+          <div class="row-sub">aufgegeben ${esc(shortDate(h.assigned || h.due))}${h.teacher ? ` · ${esc(h.teacher)}` : ""}${h.due_estimated ? " · Fälligkeit geschätzt" : ""}${h.eva ? ' · <span class="tag violet">EVA</span>' : ""}</div>
         </div>
       </li>`).join("");
     return `<section class="section reveal" style="--i:${gi}"><h2 class="section-title">${esc(label)}<span class="aside">${groups.get(key).length}</span></h2><ul class="list">${rows}</ul></section>`;

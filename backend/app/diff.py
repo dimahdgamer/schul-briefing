@@ -40,11 +40,13 @@ def _lesson_line(lesson: dict[str, Any], previous: dict[str, Any] | None) -> tup
 
     if state == "cancelled" and was != "cancelled":
         return "cancelled", f"{hour}: {lesson['subject']} fällt aus"
-    if was == "cancelled" and state != "cancelled":
+    if was == "cancelled" and state not in ("cancelled", "eva"):
         return "restored", f"{hour}: {lesson['subject']} findet doch statt"
-    if was in ("substitution", "room-change", "extra") and state == "regular":
+    if was in ("substitution", "room-change", "extra", "eva") and state == "regular":
         room = f" in {_room(lesson['room'])}" if lesson.get("room") else ""
         return "normal", f"{hour}: {lesson['subject']} wieder wie geplant{room}"
+    if state == "eva":
+        return None if was == "eva" else ("eva", f"{hour}: {lesson['subject']} als EVA")
     if state == "substitution":
         if previous and was == "substitution" and all(previous[f] == lesson[f] for f in LESSON_FIELDS):
             return None
@@ -118,6 +120,7 @@ def diff_lessons(
                 "restored": f"{label}: {lesson['subject']} findet statt",
                 "substitution": f"{label}: Vertretung in {lesson.get('original_subject') or lesson['subject']}",
                 "extra": f"{label}: Zusätzliche Stunde",
+                "eva": f"{label}: EVA in {lesson['subject']}",
                 "room": f"{label}: Raumänderung {lesson['subject']}",
                 "normal": f"{label}: {lesson['subject']} wieder wie geplant",
             }[kind]
@@ -158,11 +161,12 @@ def diff_homework(prev: list[dict[str, Any]] | None, curr: list[dict[str, Any]],
         if h["due"]:
             rel = fmt.relative_day(h["due"], today)
             due = f" bis {rel.lower() if rel in ('Heute', 'Morgen', 'Übermorgen') else rel}"
+        what = "EVA-Aufgabe" if h.get("eva") else "Hausaufgabe"
         return [
             Change(
                 category="homework",
                 kind="new",
-                title=f"Neue Hausaufgabe in {h['subject']}{due}",
+                title=f"Neue {what} in {h['subject']}{due}",
                 body=h["text"][:240],
                 ref_date=h["due"] or None,
                 url="/#/aufgaben",

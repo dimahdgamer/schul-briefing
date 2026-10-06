@@ -32,7 +32,7 @@ MAX_SINGLE_PUSHES = 4
 DISABLED_STATUS = {403, 404}  # "Modul nicht gebucht / für diese Rolle nicht freigegeben"
 # Erhöhen, wenn sich die IDs normalisierter Einträge ändern. Der erste Abruf danach
 # legt nur einen neuen Ausgangsstand an, statt alles als Änderung zu melden.
-SNAPSHOT_VERSION = 2
+SNAPSHOT_VERSION = 3  # 3: Zustand "eva" im Stundenplan, Hausaufgaben mit EVA-Markierung
 LOGIN_BACKOFF_SECONDS = 6 * 3600
 
 

@@ -281,3 +281,146 @@ def test_ical_uids_are_plain_and_stable():
     assert uids == [line[4:] for line in ical.build(lessons, [], [], ZoneInfo("Europe/Berlin")).split("\r\n") if line.startswith("UID:")]
     assert "Raum statt N 13" in body
     assert "DTSTART:20261006T093500Z" in body  # 5. Stunde 11:35 MESZ
+
+
+# ── EVA (Eigenverantwortliches Arbeiten) ─────────────────────────────
+
+_EK = {"id": 255872, "abbreviation": "EK", "name": "Erdkunde", "isPseudoSubject": False}
+_BUEH = [{"id": 557661, "abbreviation": "BÜH", "firstname": "Katharina", "lastname": "Bühnen"}]
+
+# Echter Fall: Schulmanager führt EVA als Vertretung mit Raum "EVA" und gleicher Lehrkraft
+REAL_EVA = {
+    "date": "2026-10-07", "comment": "Eigenverantwortliches Arbeiten", "classHour": {"id": 74570, "number": "7"},
+    "type": "changedLesson",
+    "actualLesson": {"room": {"id": 335685, "name": "EVA"}, "subject": _EK, "teachers": _BUEH,
+                     "comment": "Eigenverantwortliches Arbeiten", "subjectLabel": "EK L1", "substitutionId": 49057682},
+    "originalLessons": [{"room": {"id": 334959, "name": "S 07"}, "subject": _EK, "teachers": _BUEH,
+                         "subjectLabel": "EK L1", "lessonId": 23057530}],
+    "isSubstitution": True, "isNew": False,
+}
+
+
+def raw_eva(day: str, hour: str, subject: str, teacher: str = "Kowalski"):
+    original = {"subject": {"name": subject, "abbreviation": subject[:2]}, "teachers": [{"lastname": teacher}],
+                "room": {"name": "A204"}}
+    return {"date": day, "classHour": {"number": hour}, "type": "changedLesson",
+            "comment": "Eigenverantwortliches Arbeiten", "isSubstitution": True,
+            "actualLesson": dict(original, room={"name": "EVA"}, comment="Eigenverantwortliches Arbeiten"),
+            "originalLessons": [original]}
+
+
+def test_real_eva_is_eva_not_room_change():
+    lesson = normalize.lessons([REAL_EVA])[0]
+    assert lesson["state"] == "eva"
+    assert lesson["subject"] == "Erdkunde" and lesson["teacher"] == "Bühnen"
+    assert lesson["room"] == "" and lesson["original_room"] == "S 07"
+    assert lesson["comment"] == ""  # der Standardtext steckt schon im Zustand
+    assert (lesson["start"], lesson["end"]) == ("13:30", "14:15")
+
+
+def test_eva_needs_more_than_a_first_name():
+    original = {"subject": {"name": "Mathematik"}, "teachers": [{"lastname": "Kowalski"}], "room": {"name": "A204"}}
+    lesson = raw_lesson("2026-10-06", "2", "Mathematik", room="B112", comment="Eva Schmidt vertritt",
+                        originalLessons=[original])
+    assert normalize.lessons([lesson])[0]["state"] == "room-change"
+    other = raw_lesson("2026-10-06", "2", "Mathematik", room="B112", comment="EVA", originalLessons=[original])
+    assert normalize.lessons([other])[0]["state"] == "eva"
+
+
+def test_eva_hours_do_not_count_as_attendance(calendar):
+    day = date(2026, 10, 7)
+    lessons = normalize.lessons([raw_lesson("2026-10-07", "1", "Mathematik"), raw_lesson("2026-10-07", "2", "Deutsch"),
+                                 REAL_EVA])
+    summary = briefing.day_summary(day, lessons, [], [], [], set(), calendar)
+    assert summary["end"] == "09:25" and summary["planned_end"] == "14:15" and summary["early_end"]
+    assert summary["has_eva"] and not summary["all_cancelled"]
+    push = briefing.build_push("morning", summary, MONDAY + timedelta(days=1), 0, 0)
+    assert push["title"] == "Morgen 07:55–09:25 Uhr · 1 Änderung"
+    assert "7. Std Erdkunde: EVA, noch keine Aufgaben eingestellt" in push["body"]
+    assert "Früher Schluss um 09:25" in push["body"]
+    assert "als EVA" not in push["body"]  # nur die EVA-Zeile, keine zweite Änderungszeile
+
+
+def test_day_with_only_eva_needs_no_school(calendar):
+    day = date(2026, 10, 7)
+    summary = briefing.day_summary(day, normalize.lessons([REAL_EVA]), [], [], [], set(), calendar)
+    assert summary["all_cancelled"] and summary["has_eva"] and summary["start"] == ""
+    push = briefing.build_push("morning", summary, day, 0, 0)
+    assert push["title"] == "Heute: Kein Unterricht vor Ort (EVA)"
+
+
+def test_eva_tasks_are_only_from_the_last_lesson(calendar):
+    """Geschichte: Fr 25.09., Di 29.09., Fr 02.10. regulär, Di 06.10. EVA. Fällig am EVA-Tag ist nur,
+    was in der letzten Stunde (02.10.) oder am EVA-Tag selbst eingestellt wurde, nichts Älteres."""
+    lessons = normalize.lessons([
+        raw_lesson("2026-09-25", "3", "Geschichte"),
+        raw_lesson("2026-09-29", "2", "Geschichte"),
+        raw_lesson("2026-10-02", "3", "Geschichte"),
+        raw_eva("2026-10-06", "2", "Geschichte"),
+    ])
+    raw = [
+        {"date": "2026-09-25", "subject": "Geschichte", "homework": "vor zwei Wochen"},
+        {"date": "2026-09-29", "subject": "Geschichte", "homework": "vor einer Woche"},
+        {"date": "2026-10-02", "subject": "Geschichte", "homework": "letzte Stunde"},
+        {"date": "2026-10-06", "subject": "Geschichte", "homework": "am EVA-Tag eingestellt"},
+        {"date": "2026-10-06", "subject": "Physik", "homework": "anderes Fach"},
+    ]
+    homework = normalize.homework(raw, lessons, calendar.next_school_day)
+    by_text = {h["text"]: h for h in homework}
+    assert by_text["vor einer Woche"]["due"] == "2026-10-02" and not by_text["vor einer Woche"]["eva"]
+    assert by_text["letzte Stunde"]["due"] == "2026-10-06" and by_text["letzte Stunde"]["eva"]
+    assert by_text["am EVA-Tag eingestellt"]["due"] == "2026-10-06"
+    assert by_text["am EVA-Tag eingestellt"]["eva"] and not by_text["am EVA-Tag eingestellt"]["due_estimated"]
+    assert not by_text["anderes Fach"]["eva"]
+
+    summary = briefing.day_summary(date(2026, 10, 6), lessons, homework, [], [], set(), calendar)
+    (entry,) = summary["eva"]
+    assert entry["subject"] == "Geschichte" and entry["hour"] == "2"
+    assert {t["text"] for t in entry["tasks"]} == {"letzte Stunde", "am EVA-Tag eingestellt"}
+
+    push = briefing.build_push("morning", summary, date(2026, 10, 6), 0, 0)
+    assert "2. Std Geschichte: EVA, Aufgaben: letzte Stunde; am EVA-Tag eingestellt" in push["body"]
+    assert "Hausaufgaben fällig" not in push["body"]  # nicht noch einmal als normale Hausaufgabe
+
+
+def test_homework_on_day_with_regular_and_eva_hour_stays_normal(calendar):
+    lessons = normalize.lessons([
+        raw_lesson("2026-10-06", "1", "Mathematik"),
+        raw_eva("2026-10-06", "7", "Mathematik"),
+        raw_lesson("2026-10-08", "1", "Mathematik"),
+    ])
+    raw = [{"date": "2026-10-06", "subject": "Mathematik", "homework": "S. 5"}]
+    (hw,) = normalize.homework(raw, lessons, calendar.next_school_day)
+    assert hw["due"] == "2026-10-08" and not hw["eva"]
+
+
+def test_eva_message_and_taken_back():
+    regular = normalize.lessons([dict(REAL_EVA, type="regularLesson", isSubstitution=False, comment=None,
+                                      actualLesson=REAL_EVA["originalLessons"][0], originalLessons=None)])
+    eva = normalize.lessons([REAL_EVA])
+    (change,) = diff.diff_lessons(regular, eva, MONDAY)
+    assert change.title == "Übermorgen: EVA in Erdkunde"
+    assert change.body == "7. Stunde: Erdkunde als EVA"
+    assert diff.diff_lessons(eva, eva, MONDAY) == []
+    (back,) = diff.diff_lessons(eva, regular, MONDAY)
+    assert back.title == "Übermorgen: Erdkunde wieder wie geplant"
+
+
+def test_cancelled_then_eva_is_not_reported_as_restored():
+    cancelled = normalize.lessons([dict(REAL_EVA, type="cancelledLesson", isCancelled=True, actualLesson=None,
+                                        comment=None)])
+    (change,) = diff.diff_lessons(cancelled, normalize.lessons([REAL_EVA]), MONDAY)
+    assert change.kind == "eva"
+
+
+def test_new_eva_task_is_named_in_the_message():
+    curr = [{"id": "a", "subject": "Geschichte", "text": "Quelle lesen", "due": "2026-10-06", "assigned": "2026-10-06",
+             "eva": True}]
+    (change,) = diff.diff_homework([], curr, date(2026, 10, 6))
+    assert change.title == "Neue EVA-Aufgabe in Geschichte bis heute"
+
+
+def test_ical_marks_eva():
+    body = ical.build(normalize.lessons([REAL_EVA]), [], [], ZoneInfo("Europe/Berlin"))
+    assert "SUMMARY:EVA: Erdkunde" in body
+    assert "LOCATION" not in body

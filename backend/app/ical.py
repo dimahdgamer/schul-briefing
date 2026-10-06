@@ -75,7 +75,8 @@ def build(lessons: list[dict[str, Any]], exams: list[dict[str, Any]], events: li
         for l in lessons:
             if not l["start"] or not l["end"]:
                 continue
-            prefix = {"cancelled": "Entfall: ", "substitution": "Vertretung: ", "room-change": "Raum: "}.get(l["state"], "")
+            prefix = {"cancelled": "Entfall: ", "eva": "EVA: ", "substitution": "Vertretung: ",
+                      "room-change": "Raum: "}.get(l["state"], "")
             desc = []
             if l.get("teacher"):
                 desc.append(l["teacher"])

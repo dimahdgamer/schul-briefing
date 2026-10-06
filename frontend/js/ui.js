@@ -114,6 +114,7 @@ export function plural(n, one, many) {
 
 export const STATE_LABEL = {
   cancelled: ["Entfall", "red"],
+  eva: ["EVA", "violet"],
   substitution: ["Vertretung", "yellow"],
   "room-change": ["Raum", "blue"],
   extra: ["Zusätzlich", "blue"],
