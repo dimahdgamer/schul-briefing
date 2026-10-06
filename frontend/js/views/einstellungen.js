@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { currentSubscription, disablePush, enablePush, isIos, isStandalone, pushSupported } from "../push.js";
 import { openSheet } from "../sheet.js";
-import { errorState, esc, icon, longDate, skeleton, timeAgo, toast } from "../ui.js";
+import { errorState, esc, icon, longDate, shortDate, skeleton, timeAgo, toast } from "../ui.js";
 import { LOADED_BUILD, hardReload } from "../version.js";
 
 export const title = "Einstellungen";
@@ -126,6 +126,64 @@ function briefingSection(s, status, bell) {
     </div>`;
 }
 
+const COURSE_DAYS = [["0", "Mo"], ["1", "Di"], ["2", "Mi"], ["3", "Do"], ["4", "Fr"]];
+
+function courseValidity(c) {
+  if (c.from && c.to) return `${shortDate(c.from)} bis ${shortDate(c.to)}`;
+  if (c.from) return `ab ${shortDate(c.from)}`;
+  if (c.to) return `bis ${shortDate(c.to)}`;
+  return "";
+}
+
+function coursesSection(own) {
+  const rows = own.courses.map((c) => `
+    <div class="field">
+      <div>
+        <div class="field-label">${esc(c.subject)} <span class="tag">Extern</span></div>
+        <div class="field-help">${esc([c.label, c.place, courseValidity(c)].filter(Boolean).join(" · "))}</div>
+      </div>
+      <button class="btn small" data-edit-course="${esc(c.id)}">Bearbeiten</button>
+    </div>`).join("");
+  return `
+    <div class="card">
+      <div class="field stack">
+        <div class="field-help">Unterricht, den der Schulmanager nicht kennt, zum Beispiel ein Kurs an einer anderen Schule. Er steht jede Woche im Plan und zählt für den Schluss. In Ferien und an Feiertagen fällt er aus. Beurlaubungen und Klausuren deiner Schule ändern ihn nicht.</div>
+      </div>
+      ${rows}
+      <div class="field"><button class="btn small" data-action="add-course">+ Eigenen Unterricht eintragen</button></div>
+    </div>`;
+}
+
+function editCourse(existing, ctx) {
+  openSheet({
+    title: existing ? "Unterricht bearbeiten" : "Eigenen Unterricht eintragen",
+    fields: [
+      { name: "subject", label: "Fach", required: true, maxlength: 60, placeholder: "z. B. Russisch" },
+      { name: "weekdays", label: "Wochentage", type: "chips", required: true, options: COURSE_DAYS },
+      { name: "start", label: "Von", type: "time", required: true, half: true },
+      { name: "end", label: "Bis", type: "time", required: true, half: true },
+      { name: "place", label: "Ort (optional)", maxlength: 60, placeholder: "z. B. Andere Schule" },
+      { name: "from", label: "Gültig ab", type: "date", half: true },
+      { name: "to", label: "Gültig bis", type: "date", half: true, help: "Beide leer: gilt immer" },
+    ],
+    values: existing ? { ...existing, weekdays: existing.weekdays.join(",") } : {},
+    submitLabel: existing ? "Speichern" : "Eintragen",
+    onSubmit: async (values) => {
+      const body = { ...values, weekdays: values.weekdays.split(",").filter(Boolean).map(Number) };
+      await api(existing ? `/own/courses/${existing.id}` : "/own/courses", { method: existing ? "PUT" : "POST", body });
+      toast(existing ? "Unterricht gespeichert" : "Unterricht eingetragen");
+      ctx.rerender();
+    },
+    onDelete: existing
+      ? async () => {
+        await api(`/own/courses/${existing.id}`, { method: "DELETE" });
+        toast("Unterricht gelöscht");
+        ctx.rerender();
+      }
+      : undefined,
+  });
+}
+
 const FRIEND_STATE = {
   ok: '<span class="tag green">aktiv</span>',
   waiting: '<span class="tag yellow">wartet</span>',
@@ -207,9 +265,9 @@ function statusSection(status) {
 
 export async function render(main, params, ctx) {
   main.innerHTML = skeleton(6);
-  let settings, status, ical, subscription, devices, bell, me, friends;
+  let settings, status, ical, subscription, devices, bell, me, friends, own;
   try {
-    [settings, status, ical, subscription, devices, bell, me, friends] = await Promise.all([
+    [settings, status, ical, subscription, devices, bell, me, friends, own] = await Promise.all([
       api("/settings"),
       api("/status"),
       api("/ical"),
@@ -218,6 +276,7 @@ export async function render(main, params, ctx) {
       api("/bell"),
       api("/me"),
       api("/friends"),
+      api("/own"),
     ]);
   } catch (error) {
     if (!ctx.isCurrent()) return;
@@ -301,6 +360,11 @@ export async function render(main, params, ctx) {
           </div>
         </div>
       </div>
+    </section>
+
+    <section class="section reveal" style="--i:6">
+      <h2 class="section-title">Eigener Unterricht</h2>
+      ${coursesSection(own)}
     </section>
 
     <section class="section reveal" style="--i:6">
@@ -474,6 +538,12 @@ export async function render(main, params, ctx) {
     main.querySelector("#ical-url").value = fresh.url;
     toast("Neuer Link erzeugt");
   });
+  // ── Eigener Unterricht ──
+  on("add-course", () => editCourse(null, ctx));
+  main.querySelectorAll("[data-edit-course]").forEach((button) => {
+    button.addEventListener("click", () => editCourse(own.courses.find((c) => c.id === button.dataset.editCourse), ctx));
+  });
+
   // ── Freunde ──
   on("invite", () => openSheet({
     title: "Freund einladen",

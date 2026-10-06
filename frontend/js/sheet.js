@@ -10,7 +10,14 @@ import { esc } from "./ui.js";
 function fieldHtml(field, value) {
   const id = `sheet-${field.name}`;
   let control;
-  if (field.type === "select") {
+  if (field.type === "chips") {
+    // Mehrfachauswahl, der Wert steht als "0,3" in einem versteckten Feld
+    const selected = new Set(String(value ?? "").split(",").filter(Boolean));
+    control = `<input type="hidden" name="${field.name}" value="${esc([...selected].join(","))}" />
+      <div class="chips" role="group" aria-label="${esc(field.label)}" data-chips="${field.name}">${field.options
+      .map(([v, label]) => `<button type="button" class="chip" data-chip="${esc(v)}" aria-pressed="${selected.has(String(v))}">${esc(label)}</button>`)
+      .join("")}</div>`;
+  } else if (field.type === "select") {
     control = `<select class="input" id="${id}" name="${field.name}">${field.options
       .map(([v, label]) => `<option value="${esc(v)}" ${String(value ?? "") === String(v) ? "selected" : ""}>${esc(label)}</option>`)
       .join("")}</select>`;
@@ -92,6 +99,16 @@ export function openSheet({ title, fields, values = {}, submitLabel = "Speichern
   form.addEventListener("input", (event) => {
     if (onChange && event.target.name) onChange({ name: event.target.name, values: raw(), set });
     sync();
+  });
+  dialog.querySelectorAll("[data-chips]").forEach((group) => {
+    group.addEventListener("click", (event) => {
+      const chip = event.target.closest("[data-chip]");
+      if (!chip) return;
+      chip.setAttribute("aria-pressed", String(chip.getAttribute("aria-pressed") !== "true"));
+      const input = form.elements[group.dataset.chips];
+      input.value = [...group.querySelectorAll('[aria-pressed="true"]')].map((c) => c.dataset.chip).join(",");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();

@@ -772,6 +772,10 @@ button.card:hover {
   background: var(--blue);
   opacity: 0.6;
 }
+.lesson.is-external::before {
+  background: var(--muted);
+  opacity: 0.5;
+}
 .lesson.is-leave .lesson-subject,
 .lesson.is-leave .lesson-hour {
   color: var(--faint);
@@ -1322,7 +1326,7 @@ kbd {
 .mini li {
   position: relative;
   display: grid;
-  grid-template-columns: 22px 1fr auto;
+  grid-template-columns: 32px 1fr auto; /* breit genug für "9–11" bei eigenem Unterricht über mehrere Stunden */
   align-items: baseline;
   gap: 8px;
   padding: 8px 12px;
@@ -1336,6 +1340,7 @@ kbd {
   color: var(--faint);
   font-family: var(--font-mono);
   font-size: 12px;
+  white-space: nowrap;
 }
 .mini .s {
   overflow: hidden;
@@ -1364,6 +1369,9 @@ kbd {
 }
 .mini li.is-eva .s {
   color: var(--muted);
+}
+.mini li.is-external {
+  background: var(--surface-2);
 }
 .mini li.is-leave {
   background: var(--blue-bg);

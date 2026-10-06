@@ -117,6 +117,7 @@ export const STATE_LABEL = {
   eva: ["EVA", "violet"],
   exam: ["Klausur", "red"],
   leave: ["Beurlaubt", "blue"],
+  external: ["Extern", ""],
   substitution: ["Vertretung", "yellow"],
   "room-change": ["Raum", "blue"],
   extra: ["Zusätzlich", "blue"],

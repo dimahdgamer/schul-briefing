@@ -274,3 +274,69 @@ def test_briefing_skipped_only_when_everything_is_free(client):
     assert not service.briefing_skipped(day)  # die 3. Stunde bleibt
     set_leave(hour_from="1", hour_to="3")
     assert service.briefing_skipped(day)  # alle Stunden beurlaubt
+
+
+# ── Eigener wiederkehrender Unterricht ───────────────────────────────
+
+COURSE = {"subject": "Russisch", "weekdays": [3], "start": "15:00", "end": "17:15", "place": "Andere Schule"}
+
+
+def test_course_crud(client):
+    http, _ = client
+    assert http.post("/api/own/courses", json=COURSE).status_code == 401
+    http.post("/api/login", json={"password": "geheim"})
+    created = http.post("/api/own/courses", json=COURSE)
+    assert created.status_code == 200
+    item = created.json()
+    listed = http.get("/api/own").json()["courses"]
+    assert listed[0]["id"] == item["id"] and listed[0]["label"] == "Do · 15:00–17:15 · 9–11. Std"
+
+    changed = http.put(f"/api/own/courses/{item['id']}", json=dict(COURSE, weekdays=[1, 3])).json()
+    assert changed["weekdays"] == [1, 3]
+    assert http.post("/api/own/courses", json=dict(COURSE, weekdays=[])).status_code == 400
+    assert http.delete(f"/api/own/courses/{item['id']}").json() == {"ok": True}
+    assert http.get("/api/own").json()["courses"] == []
+
+
+def test_course_shows_in_day_and_week_and_ignores_leave(client):
+    http, main = client
+    http.post("/api/login", json={"password": "geheim"})
+    http.post("/api/own/courses", json=COURSE)
+    # Donnerstag ganztägig beurlaubt: die Schulstunden entfallen, Russisch an der anderen Schule nicht
+    http.post("/api/own/leaves", json={"from": "2026-10-08", "to": "2026-10-08"})
+    main.service.db.save_snapshot("lessons", [
+        {"id": "a", "date": "2026-10-08", "hour": "1", "state": "regular", "start": "07:55", "end": "08:40", "subject": "Mathematik"},
+    ])
+    day = http.get("/api/overview?date=2026-10-08").json()["day"]
+    assert [(l["state"], l["subject"]) for l in day["lessons"]] == [("leave", "Mathematik"), ("external", "Russisch")]
+    assert (day["start"], day["end"]) == ("15:00", "17:15") and not day["all_cancelled"]
+
+    week = http.get("/api/week?start=2026-10-05").json()
+    thursday = week["days"][3]["lessons"]
+    assert [l["subject"] for l in thursday if l["state"] == "external"] == ["Russisch"]
+    assert not [l for d in week["days"][:3] + week["days"][4:] for l in d["lessons"] if l["state"] == "external"]
+
+
+def test_day_stays_on_thursday_until_russian_is_over(client, monkeypatch):
+    from datetime import datetime
+
+    http, main = client
+    service = main.service
+    http.post("/api/login", json={"password": "geheim"})
+    http.post("/api/own/courses", json=COURSE)
+    main.service.db.save_snapshot("lessons", [
+        {"id": "a", "date": "2026-10-08", "hour": "1", "state": "regular", "start": "07:55", "end": "13:05", "subject": "Mathematik"},
+    ])
+    monkeypatch.setattr(service, "now", lambda: datetime(2026, 10, 8, 16, 30, tzinfo=main.cfg.tz))
+    assert service.default_day() == date(2026, 10, 8)  # Russisch läuft noch bis 17:15
+    monkeypatch.setattr(service, "now", lambda: datetime(2026, 10, 8, 17, 20, tzinfo=main.cfg.tz))
+    assert service.default_day() == date(2026, 10, 9)
+
+
+def test_course_in_calendar_feed_via_api(client):
+    http, _ = client
+    http.post("/api/login", json={"password": "geheim"})
+    http.post("/api/own/courses", json=COURSE)
+    token = http.get("/api/ical").json()["url"].rsplit("/", 1)[1]
+    feed = http.get(f"/cal/{token}").text
+    assert "SUMMARY:Russisch" in feed and "LOCATION:Andere Schule" in feed

@@ -84,8 +84,8 @@ def day_summary(
         "eva": _eva_entries(day_lessons, hw_due, done_ids),
         "leaves": day_leaves,
         "full_leave": any(not l.get("hour_from") for l in day_leaves),  # ganzer Tag beurlaubt
-        # Klausur und Beurlaubung sind keine Änderungen des Plans
-        "changes": [l for l in day_lessons if l["state"] not in ("regular", "exam", "leave")],
+        # Klausur, Beurlaubung und eigener Unterricht sind keine Änderungen des Plans
+        "changes": [l for l in day_lessons if l["state"] not in ("regular", "exam", "leave", "external")],
         "homework_due": [dict(h, done=h["id"] in done_ids) for h in hw_due],
         "exams_today": [e for e in exams if e["date"] == iso],
         "exams_upcoming": upcoming_exams,
@@ -114,6 +114,8 @@ def _change_line(lesson: dict[str, Any]) -> str:
 def _lesson_label(lesson: dict[str, Any]) -> str:
     if lesson["state"] == "exam":
         return f"{lesson.get('exam_type') or 'Klausur'} {lesson['subject']}"
+    if lesson["state"] == "external":
+        return lesson["subject"] + (f", {lesson['room']}" if lesson.get("room") else "")
     return f"{lesson['hour']}. Std {lesson['subject']}" if lesson["hour"] else lesson["subject"]
 
 
@@ -189,6 +191,11 @@ def build_push(
         lines.extend(change_lines)
 
     lines.extend(_eva_line(entry) for entry in summary["eva"])
+
+    for lesson in summary["lessons"]:
+        if lesson["state"] == "external":
+            place = f", {lesson['room']}" if lesson.get("room") else ""
+            lines.append(f"{lesson['subject']} {lesson['start']}–{lesson['end']} Uhr{place}")
 
     for exam in summary["exams_today"]:
         when = f" ({exam['start']}–{exam['end']} Uhr)" if exam.get("start") and exam.get("end") else ""

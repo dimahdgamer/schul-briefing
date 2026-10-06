@@ -197,7 +197,7 @@ async def exams() -> dict[str, Any]:
 
 # ── Eigene Einträge: Klausuren und Beurlaubungen ─────────────────────
 
-OWN_CLEANERS = {"exams": own.clean_exam, "leaves": own.clean_leave}
+OWN_CLEANERS = {"exams": own.clean_exam, "leaves": own.clean_leave, "courses": own.clean_course}
 
 
 def _own_cleaner(kind: str):
@@ -219,6 +219,7 @@ async def own_entries() -> dict[str, Any]:
         "today": service.today().isoformat(),
         "exams": service.own("exams"),
         "leaves": service.own("leaves"),
+        "courses": [dict(c, label=own.course_label(c)) for c in service.own("courses")],
         "subjects": service.subjects(),
         "hours": [{"hour": h, "start": s, "end": e} for h, (s, e) in bell.CLASS_HOURS.items()],
     }

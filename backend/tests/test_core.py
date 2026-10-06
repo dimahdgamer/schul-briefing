@@ -552,3 +552,76 @@ def test_ical_has_leave_and_exam_once():
     assert "SUMMARY:Beurlaubt: Arzttermin" in body and "DTSTART:20261006T093500Z" in body  # 5. Std 11:35
     assert "SUMMARY:Erdkunde" not in body and "SUMMARY:Musik" not in body  # beurlaubte Stunden fehlen
     assert "DTSTART;VALUE=DATE:20261006" in body and "DTEND;VALUE=DATE:20261009" in body
+
+
+# ── Eigener wiederkehrender Unterricht ───────────────────────────────
+
+def russian(**extra):
+    base = {"id": "own-c1", "subject": "Russisch", "weekdays": [3], "start": "15:00", "end": "17:15",
+            "place": "Andere Schule", "from": "", "to": ""}
+    return dict(base, **extra)
+
+
+def test_bell_hour_span():
+    assert bell.hour_span("15:00", "17:15") == "9–11"  # die 9. bis 11. Stunde
+    assert bell.hour_span("07:55", "08:40") == "1"
+    assert bell.hour_span("08:40", "10:30") == "2–3"
+    assert bell.hour_span("20:00", "21:00") == "" and bell.hour_span("", "") == ""
+
+
+def test_course_appears_on_its_weekday_only(calendar):
+    out = own.course_lessons([russian()], date(2026, 10, 5), date(2026, 10, 16), calendar.in_official_holiday)
+    assert [l["date"] for l in out] == ["2026-10-08", "2026-10-15"]  # beide Donnerstage
+    lesson = out[0]
+    assert (lesson["state"], lesson["subject"], lesson["hour"], lesson["room"]) == ("external", "Russisch", "9–11", "Andere Schule")
+    assert (lesson["start"], lesson["end"]) == ("15:00", "17:15")
+
+
+def test_course_follows_holidays_but_not_school_free_days(calendar):
+    # Herbstferien 17.–31.10. fallen aus, ebenso ein Feiertag
+    calendar._periods.append(Period(date(2026, 10, 15), date(2026, 10, 15), "Feiertag", "public"))
+    # Ein freier Tag nur der eigenen Schule (aus dem Schulkalender) betrifft die andere Schule nicht
+    calendar.set_calendar_holidays([{"is_holiday": True, "start": "2026-10-08T00:00:00", "end": "2026-10-09T00:00:00",
+                                     "all_day": True, "title": "Studientag"}])
+    assert not calendar.is_school_day(date(2026, 10, 8))  # für die eigene Schule ist frei
+    out = own.course_lessons([russian()], date(2026, 10, 5), date(2026, 10, 30), calendar.in_official_holiday)
+    assert [l["date"] for l in out] == ["2026-10-08"]  # 15.10. Feiertag, 22. und 29.10. Ferien
+
+
+def test_course_validity_range_and_several_days(calendar):
+    course = russian(weekdays=[1, 3], **{"from": "2026-10-07", "to": "2026-10-13"})
+    out = own.course_lessons([course], date(2026, 10, 5), date(2026, 10, 16), calendar.in_official_holiday)
+    assert [l["date"] for l in out] == ["2026-10-08", "2026-10-13"]  # Do 08.10. und Di 13.10.
+
+
+def test_course_makes_the_school_day_end_later(calendar):
+    lessons = day_plan("2026-10-08") + own.course_lessons([russian()], date(2026, 10, 8), date(2026, 10, 8), lambda d: False)
+    summary = briefing.day_summary(date(2026, 10, 8), lessons, [], [], [], set(), calendar)
+    assert summary["end"] == "17:15" and not summary["early_end"] and summary["changes"] == []
+    push = briefing.build_push("morning", summary, date(2026, 10, 8), 0, 0)
+    assert push["title"] == "Heute 07:55–17:15 Uhr"
+    assert "Russisch 15:00–17:15 Uhr, Andere Schule" in push["body"]
+
+
+def test_course_in_calendar_feed():
+    lessons = own.course_lessons([russian()], date(2026, 10, 8), date(2026, 10, 8), lambda d: False)
+    body = ical.build(lessons, [], [], ZoneInfo("Europe/Berlin"))
+    assert "SUMMARY:Russisch" in body and "LOCATION:Andere Schule" in body
+    assert "DTSTART:20261008T130000Z" in body and "DTEND:20261008T151500Z" in body  # 15:00–17:15 MESZ
+
+
+def test_course_input_validation():
+    ok = own.clean_course({"subject": " Russisch ", "weekdays": "3", "start": "15:00", "end": "17:15", "place": "Andere Schule"})
+    assert ok == {"subject": "Russisch", "weekdays": [3], "start": "15:00", "end": "17:15",
+                  "place": "Andere Schule", "from": "", "to": ""}
+    assert own.clean_course({"subject": "X", "weekdays": [4, 1, 1], "start": "9:00", "end": "10:00"})["weekdays"] == [1, 4]
+    base = {"subject": "Russisch", "weekdays": [3], "start": "15:00", "end": "17:15"}
+    for bad in (dict(base, subject=""), dict(base, weekdays=[]), dict(base, weekdays="x"), dict(base, weekdays=[5]),
+                dict(base, end="15:00"), dict(base, start="25:00"), dict(base, **{"from": "2026-10-10", "to": "2026-10-01"})):
+        with pytest.raises(ValueError):
+            own.clean_course(bad)
+
+
+def test_course_label():
+    assert own.course_label(russian()) == "Do · 15:00–17:15 · 9–11. Std"
+    assert own.course_label(russian(weekdays=[0, 2], start="19:00", end="20:00")) == "Mo, Mi · 19:00–20:00"

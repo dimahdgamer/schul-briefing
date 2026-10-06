@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 import secrets
-from datetime import date
-from typing import Any
+from datetime import date, timedelta
+from typing import Any, Callable
 
 from . import bell, fmt
 
@@ -68,6 +68,36 @@ def clean_exam(body: dict[str, Any]) -> dict[str, Any]:
         "end": end,
         "type": _text(body.get("type"), "Art", 30) or "Klausur",
         "comment": _text(body.get("comment"), "Notiz", 200),
+    }
+
+
+def clean_course(body: dict[str, Any]) -> dict[str, Any]:
+    start, end = _time(body.get("start"), "Beginn"), _time(body.get("end"), "Ende")
+    if end <= start:
+        raise ValueError("Das Ende muss nach dem Beginn liegen.")
+    days = body.get("weekdays")
+    if isinstance(days, str):
+        days = [d for d in days.split(",") if d.strip()]
+    try:
+        weekdays = sorted({int(d) for d in days or []})
+    except (TypeError, ValueError):
+        raise ValueError("Wochentage: ungültig.") from None
+    if not weekdays:
+        raise ValueError("Bitte mindestens einen Wochentag wählen.")
+    if any(d < 0 or d > 4 for d in weekdays):
+        raise ValueError("Wochentage: nur Montag bis Freitag.")
+    first = _day(body["from"], "Gültig ab") if body.get("from") else ""
+    last = _day(body["to"], "Gültig bis") if body.get("to") else ""
+    if first and last and last < first:
+        raise ValueError("Gültig bis darf nicht vor Gültig ab liegen.")
+    return {
+        "subject": _text(body.get("subject"), "Fach", 60, required=True),
+        "weekdays": weekdays,
+        "start": start,
+        "end": end,
+        "place": _text(body.get("place"), "Ort", 60),
+        "from": first,
+        "to": last,
     }
 
 
@@ -180,6 +210,54 @@ def _exam_lesson(exam: dict[str, Any]) -> dict[str, Any]:
         "original_room": "",
         "comment": exam.get("comment") or "",
     }
+
+
+WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr"]
+
+
+def course_lessons(
+    courses: list[dict[str, Any]], first: date, last: date, is_off: Callable[[date], bool]
+) -> list[dict[str, Any]]:
+    """Wiederkehrender eigener Unterricht (z. B. ein Kurs an einer anderen Schule) als Stunden.
+
+    Er fällt in Ferien und an Feiertagen aus (`is_off`). Beurlaubung und Klausuren der eigenen
+    Schule ändern ihn nicht, er gehört ja zu einer anderen."""
+    out: list[dict[str, Any]] = []
+    day = first
+    while day <= last:
+        iso = day.isoformat()
+        if day.weekday() < 5 and not is_off(day):
+            for course in courses:
+                if day.weekday() not in course["weekdays"]:
+                    continue
+                if (course.get("from") and iso < course["from"]) or (course.get("to") and iso > course["to"]):
+                    continue
+                out.append({
+                    "id": f"course:{course['id']}:{iso}",
+                    "date": iso,
+                    "hour": bell.hour_span(course["start"], course["end"]),
+                    "start": course["start"],
+                    "end": course["end"],
+                    "subject": course["subject"],
+                    "abbr": "",
+                    "course": "",
+                    "teacher": "",
+                    "room": course.get("place") or "",
+                    "state": "external",
+                    "original_subject": "",
+                    "original_teacher": "",
+                    "original_room": "",
+                    "comment": "",
+                })
+        day += timedelta(days=1)
+    return out
+
+
+def course_label(course: dict[str, Any]) -> str:
+    """'Do · 15:00–17:15 · 9–11. Std', für die Liste in den Einstellungen."""
+    days = ", ".join(WEEKDAY_NAMES[d] for d in course["weekdays"])
+    hours = bell.hour_span(course["start"], course["end"])
+    return f"{days} · {course['start']}–{course['end']}" + (f" · {hours}. Std" if hours else "")
 
 
 def overlay(

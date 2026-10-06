@@ -48,6 +48,18 @@ def hour_at(hhmm: str) -> str:
     return ""
 
 
+def hour_span(start: str, end: str) -> str:
+    """Stunden einer Uhrzeitspanne: 15:00–17:15 wird '9–11', eine einzelne Stunde '9'. Leer außerhalb des Rasters."""
+    first = hour_at(start)
+    if not first or not re.match(r"^\d{2}:\d{2}$", end or ""):
+        return ""
+    last = first
+    for number, (hour_start, _end) in CLASS_HOURS.items():
+        if int(number) >= int(first) and hour_start < end:
+            last = number
+    return first if last == first else f"{first}–{last}"
+
+
 def times_for(hour: str) -> tuple[str, str]:
     """Beginn und Ende einer Stunde laut Raster, auch für Doppelstunden wie '5/6'."""
     start = CLASS_HOURS.get(first_number(hour), ("", ""))[0]

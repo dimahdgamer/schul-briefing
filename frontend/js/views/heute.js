@@ -37,7 +37,7 @@ function lede(day, data) {
 function lessonRow(lesson, index) {
   const meta = [];
   const isExam = lesson.state === "exam";
-  if (isExam) meta.push(`<span class="mono">${esc(lesson.start)}–${esc(lesson.end)} Uhr</span>`);
+  if (isExam || lesson.state === "external") meta.push(`<span class="mono">${esc(lesson.start)}–${esc(lesson.end)} Uhr</span>`);
   if (lesson.state === "substitution" && lesson.original_subject && lesson.original_subject !== lesson.subject) {
     meta.push(`<span class="was">statt ${esc(lesson.original_subject)}</span>`);
   }

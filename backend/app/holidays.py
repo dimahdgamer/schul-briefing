@@ -117,6 +117,10 @@ class SchoolCalendar:
     def is_school_day(self, day: date) -> bool:
         return day.weekday() < 5 and self.holiday(day) is None
 
+    def in_official_holiday(self, day: date) -> bool:
+        """Schulferien und Feiertage laut Ferienkalender, ohne schulfreie Tage nur der eigenen Schule."""
+        return any(p.contains(day) for p in self._periods)
+
     def next_school_day(self, day: date, include_today: bool = False) -> date:
         current = day if include_today else day + timedelta(days=1)
         for _ in range(120):

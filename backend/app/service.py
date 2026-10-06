@@ -48,12 +48,24 @@ class AppService:
         mine = [own.exam_item(e) for e in self.own("exams")]
         return sorted(self.snap("exams") + mine, key=lambda e: (e["date"], e.get("start") or ""))
 
-    def with_own(self, lessons: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Stundenplan mit Klausuren und Beurlaubungen darüber."""
-        return own.overlay(lessons, [own.exam_item(e) for e in self.own("exams")], self.own("leaves"))
+    def with_own(
+        self, lessons: list[dict[str, Any]], first: date | None = None, last: date | None = None
+    ) -> list[dict[str, Any]]:
+        """Stundenplan mit Klausuren und Beurlaubungen darüber, dazu eigener wiederkehrender Unterricht.
 
-    def lessons(self) -> list[dict[str, Any]]:
-        return self.with_own(self.snap("lessons"))
+        Der Zeitraum (first bis last) bestimmt, für welche Tage der wiederkehrende Unterricht
+        erzeugt wird. Ohne Angabe gilt das Fenster des Stundenplan-Abrufs."""
+        shown = own.overlay(lessons, [own.exam_item(e) for e in self.own("exams")], self.own("leaves"))
+        courses = self.own("courses")
+        if courses:
+            if first is None or last is None:
+                first, last = self.sync.lesson_window(self.today())
+            shown = shown + own.course_lessons(courses, first, last, self.calendar.in_official_holiday)
+            shown.sort(key=lambda l: (l["date"], l.get("start") or "99:99"))
+        return shown
+
+    def lessons(self, first: date | None = None, last: date | None = None) -> list[dict[str, Any]]:
+        return self.with_own(self.snap("lessons"), first, last)
 
     def subjects(self) -> list[str]:
         """Fächer aus dem Stundenplan, als Vorschläge für die Eingabe."""
@@ -64,7 +76,7 @@ class AppService:
     def day(self, day: date) -> dict[str, Any]:
         summary = briefing.day_summary(
             day,
-            self.lessons(),
+            self.lessons(day, day),
             self.snap("homework"),
             self.exams(),
             self.snap("calendar"),
@@ -130,9 +142,9 @@ class AppService:
         start, end = self.sync.lesson_window(self.today())
         source = "snapshot"
         if start <= monday and friday <= end:
-            lessons = self.lessons()
+            lessons = self.lessons(monday, friday)
         else:
-            lessons = self.with_own(await self.sync.lessons_for(monday, friday))
+            lessons = self.with_own(await self.sync.lessons_for(monday, friday), monday, friday)
             source = "live"
         days = []
         events = self.snap("calendar")
@@ -170,7 +182,7 @@ class AppService:
         # Eine eigene Klausur hat keine Stundennummer: die Stunde kommt aus ihrer Uhrzeit
         hours = [
             bell.first_number(l["hour"]) or bell.hour_at(l.get("start") or "")
-            for l in self.lessons() if l["date"] == iso
+            for l in self.lessons(day, day) if l["date"] == iso
         ]
         hours = sorted({int(h) for h in hours if h})
         if not hours:
