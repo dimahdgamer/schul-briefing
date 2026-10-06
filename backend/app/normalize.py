@@ -163,6 +163,46 @@ def lessons(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+MERGE_KEYS = ("subject", "course", "teacher", "room", "state", "original_subject", "original_teacher", "original_room")
+NEVER_MERGED = {"exam", "external"}  # Klausuren und eigener Unterricht haben schon ihre eigene Zeitspanne
+
+
+def merge_double_lessons(lesson_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Doppelstunden zu einer Zeile zusammenfassen (Reihenfolge nach Beginn vorausgesetzt).
+
+    Zusammengefasst wird, wenn die zweite Stunde genau dann beginnt, wenn die erste endet, und Fach, Kurs,
+    Lehrkraft, Raum und Zustand gleich sind. Eine Pause dazwischen (z. B. zwischen der 2. und 3. Stunde)
+    verhindert es: Dann sind es zwei Stunden. Aus "3" und "4" wird "3–4", der Beginn ist der der ersten,
+    das Ende das der letzten. `lesson_count` sagt, wie viele Stunden darin stecken."""
+    out: list[dict[str, Any]] = []
+    for lesson in lesson_list:
+        prev = out[-1] if out else None
+        if (
+            prev is not None
+            and prev["date"] == lesson["date"]
+            and prev.get("end")
+            and prev["end"] == lesson.get("start")
+            and prev["state"] not in NEVER_MERGED
+            and lesson["state"] not in NEVER_MERGED
+            and not _s(prev.get("id")).startswith("course:")  # eigener Unterricht bleibt es auch als "beurlaubt"
+            and not _s(lesson.get("id")).startswith("course:")
+            and re.fullmatch(r"\d+(–\d+)?", _s(prev["hour"]))
+            and re.fullmatch(r"\d+", _s(lesson["hour"]))
+            and all(prev.get(key) == lesson.get(key) for key in MERGE_KEYS)
+        ):
+            comments = [c for c in dict.fromkeys([_s(prev.get("comment")), _s(lesson.get("comment"))]) if c]
+            out[-1] = dict(
+                prev,
+                end=lesson["end"],
+                hour=f"{bell.first_number(prev['hour'])}–{bell.last_number(lesson['hour'])}",
+                lesson_count=prev.get("lesson_count", 1) + 1,
+                comment=" · ".join(comments),
+            )
+        else:
+            out.append(lesson)
+    return out
+
+
 # ── Hausaufgaben ─────────────────────────────────────────────────────
 
 

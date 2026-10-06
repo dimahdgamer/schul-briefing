@@ -110,11 +110,11 @@ def diff_lessons(
 
     changes = []
     for day in sorted(per_day):
-        entries = sorted(per_day[day], key=lambda e: _hour_key(e[2]["hour"]))
+        entries = _merge_doubles(sorted(per_day[day], key=lambda e: _hour_key(e[2]["hour"])))
         kinds = {e[0] for e in entries}
         label = fmt.relative_day(day, today)
         if len(entries) == 1:
-            kind, line, lesson = entries[0]
+            kind, line, lesson, _ids = entries[0]
             title = {
                 "cancelled": f"{label}: {lesson['subject']} fällt aus",
                 "restored": f"{label}: {lesson['subject']} findet statt",
@@ -134,10 +134,43 @@ def diff_lessons(
                 body="\n".join(e[1] for e in entries),
                 ref_date=day,
                 url=f"/#/heute?date={day}",
-                data={"lessons": [e[2]["id"] for e in entries]},
+                data={"lessons": [i for e in entries for i in e[3]]},
             )
         )
     return changes
+
+
+def _merge_doubles(
+    entries: list[tuple[str, str, dict[str, Any]]]
+) -> list[tuple[str, str, dict[str, Any], list[str]]]:
+    """Eine Doppelstunde mit derselben Änderung wird eine Meldung: "3–4. Stunde: Musik fällt aus".
+
+    Gleiche Art und gleicher Text (ohne die Stundennummer) und die zweite Stunde beginnt, wenn die erste
+    endet. Am Ende steht je Eintrag die Liste der beteiligten Stunden-Kennungen."""
+    out: list[list[Any]] = []  # [Art, Kopf, Rest, erste Stunde, letzte Stunde, Kennungen]
+    for kind, line, lesson in entries:
+        head, _sep, rest = line.partition(": ")
+        prev = out[-1] if out else None
+        if (
+            prev
+            and prev[0] == kind
+            and prev[2] == rest
+            and prev[4]["date"] == lesson["date"]
+            and prev[4].get("end")
+            and prev[4]["end"] == lesson.get("start")
+            and prev[3]["hour"].isdigit()
+            and lesson["hour"].isdigit()
+        ):
+            prev[4] = lesson
+            prev[5].append(lesson["id"])
+        else:
+            out.append([kind, head, rest, lesson, lesson, [lesson["id"]]])
+    merged = []
+    for kind, head, rest, first, last, ids in out:
+        if first is not last:
+            head = f"{first['hour']}–{last['hour']}. Stunde"
+        merged.append((kind, f"{head}: {rest}", first, ids))
+    return merged
 
 
 def _hour_key(hour: str) -> int:

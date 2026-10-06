@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from . import bell, briefing, fmt, own
+from . import bell, briefing, fmt, normalize, own
 from .config import Config
 from .db import Database
 from .friends import Friends
@@ -77,7 +77,8 @@ class AppService:
             extra = own.course_lessons(courses, first, last, self.calendar.in_official_holiday)
             shown = shown + own.mark_leave(extra, leaves)
             shown.sort(key=lambda l: (l["date"], l.get("start") or "99:99"))
-        return shown
+        # Doppelstunden erscheinen als eine Zeile. Die Rohdaten (Änderungserkennung, Hausaufgaben) bleiben je Stunde.
+        return normalize.merge_double_lessons(shown)
 
     def lessons(self, first: date | None = None, last: date | None = None) -> list[dict[str, Any]]:
         return self.with_own(self.snap("lessons"), first, last)

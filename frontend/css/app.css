@@ -1336,7 +1336,7 @@ kbd {
 .mini li {
   position: relative;
   display: grid;
-  grid-template-columns: 32px 1fr auto; /* breit genug für "9–11" bei eigenem Unterricht über mehrere Stunden */
+  grid-template-columns: 40px 1fr auto; /* breit genug für "10–11", Doppelstunden und eigenen Unterricht über mehrere Stunden */
   align-items: baseline;
   gap: 8px;
   padding: 8px 12px;

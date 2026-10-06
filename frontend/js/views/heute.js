@@ -38,7 +38,9 @@ function lede(day, data) {
 function lessonRow(lesson, index) {
   const meta = [];
   const isExam = lesson.state === "exam";
-  if (isExam || lesson.state === "external") meta.push(`<span class="mono">${esc(lesson.start)}–${esc(lesson.end)} Uhr</span>`);
+  if (isExam || lesson.state === "external" || lesson.lesson_count > 1) {
+    meta.push(`<span class="mono">${esc(lesson.start)}–${esc(lesson.end)} Uhr</span>`);
+  }
   if (lesson.state === "substitution" && lesson.original_subject && lesson.original_subject !== lesson.subject) {
     meta.push(`<span class="was">statt ${esc(lesson.original_subject)}</span>`);
   }
@@ -92,7 +94,9 @@ function tiles(day, data) {
     : day.first_lesson
       ? `${esc(day.first_lesson.subject)}${day.first_lesson.room ? ` · ${esc(day.first_lesson.room)}` : ""}`
       : "";
-  const endNote = day.early_end ? `statt ${esc(day.planned_end)}` : plural(active.length, "Stunde", "Stunden");
+  // Eine Doppelstunde ist eine Zeile, zählt aber als zwei Stunden
+  const lessonCount = active.reduce((n, l) => n + (l.lesson_count || 1), 0);
+  const endNote = day.early_end ? `statt ${esc(day.planned_end)}` : plural(lessonCount, "Stunde", "Stunden");
   const changeTags = [...new Set(day.changes.map((c) => c.state))].map(stateTag).join(" ");
   const hwOpen = day.homework_due.filter((h) => !h.done);
   // Die nächste Arbeit gesehen vom angezeigten Tag, nicht von heute: sonst steht dort "vor 2 Tagen"
