@@ -1,6 +1,6 @@
 import { api, setUnauthorizedHandler } from "./api.js";
 import { syncSubscription } from "./push.js";
-import { icon } from "./ui.js";
+import { icon, logo } from "./ui.js";
 import { LOADED_BUILD, hardReload, newerVersion } from "./version.js";
 import * as heute from "./views/heute.js";
 import * as woche from "./views/woche.js";
@@ -12,12 +12,12 @@ import * as login from "./views/login.js";
 
 const ROUTES = { heute, woche, aufgaben, post, verlauf, einstellungen };
 
+// Verlauf und Einstellungen sind keine Reiter: Sie sitzen als Symbole in der Kopfzeile (Handy) bzw. in der Seitenleiste
 const TABS = [
   ["heute", "Heute", "house"],
   ["woche", "Woche", "calendar-dots"],
   ["aufgaben", "Aufgaben", "notebook"],
   ["post", "Post", "envelope-simple"],
-  ["verlauf", "Verlauf", "clock-counter-clockwise"],
 ];
 
 const root = document.getElementById("root");
@@ -41,24 +41,26 @@ export function navigate(hash, { replace = false } = {}) {
 }
 
 function shell() {
-  const sideLinks = visibleTabs().filter(([key]) => key !== "verlauf").map(
+  const tabs = visibleTabs();
+  const sideLinks = tabs.map(
     ([key, label, ic]) => `<a class="side-link" href="#/${key}" data-route="${key}">${icon(ic)}<span>${label}</span></a>`
   ).join("");
+  const brand = `<a class="brand" href="#/heute" aria-label="Schule, zur Startseite">${logo(30)}<span class="brand-name">Schule</span></a>`;
   root.innerHTML = `
     <a class="skip-link" href="#main" data-skip>Zum Inhalt springen</a>
     <div class="app">
       <aside class="sidebar" aria-label="Navigation">
-        <a class="brand" href="#/heute"><span class="brand-mark">S</span><span class="brand-name">Schule</span></a>
+        ${brand}
         ${sideLinks}
         <div class="side-sep"></div>
-        <a class="side-link" href="#/verlauf" data-route="verlauf">${icon("clock-counter-clockwise")}<span>Verlauf</span><span class="count" data-badge></span></a>
+        <a class="side-link" href="#/verlauf" data-route="verlauf">${icon("bell-simple")}<span>Verlauf</span><span class="count" data-badge></span></a>
         <a class="side-link" href="#/einstellungen" data-route="einstellungen">${icon("gear-six")}<span>Einstellungen</span></a>
-        <div class="side-foot" id="side-foot"></div>
       </aside>
       <div class="content">
         <header class="topbar" id="topbar">
-          <a class="brand" href="#/heute"><span class="brand-mark">S</span><span class="brand-name">Schule</span></a>
+          ${brand}
           <nav class="topbar-actions" aria-label="Weitere">
+            <a class="icon-btn" href="#/verlauf" data-route="verlauf" aria-label="Verlauf">${icon("bell-simple")}<span class="badge-dot" data-badge hidden></span></a>
             <a class="icon-btn" href="#/einstellungen" data-route="einstellungen" aria-label="Einstellungen">${icon("gear-six")}</a>
           </nav>
         </header>
@@ -66,7 +68,7 @@ function shell() {
         <main class="main" id="main" tabindex="-1"></main>
       </div>
       <nav class="tabbar" aria-label="Hauptnavigation">
-        ${visibleTabs().map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span>${key === "verlauf" ? '<span class="badge-dot" data-badge hidden></span>' : ""}</a>`).join("")}
+        ${tabs.map(([key, label, ic]) => `<a class="tab" href="#/${key}" data-route="${key}">${icon(ic, "lg")}<span>${label}</span></a>`).join("")}
       </nav>
     </div>`;
 

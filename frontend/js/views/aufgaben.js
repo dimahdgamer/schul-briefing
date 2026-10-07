@@ -24,12 +24,14 @@ function writePref(key, value) {
   }
 }
 
+let olderOpen = false; // bleibt aufgeklappt, wenn die Ansicht neu gezeichnet wird (z. B. "Erledigte ausblenden")
+
 function homeworkView(data, hideDone) {
   const today = data.today;
   const items = data.items.filter((h) => h.due >= addDays(today, -14));
   const visible = items.filter((h) => !(hideDone && h.done));
   if (!visible.length) {
-    return `<div class="empty reveal"><span class="serif">Nichts zu tun</span>${hideDone && items.length ? "Alle Hausaufgaben sind erledigt." : "Es sind keine Hausaufgaben eingetragen."}</div>`;
+    return `<div class="empty reveal"><span class="serif">Nichts zu tun</span>${hideDone && items.length ? "Alles erledigt." : "Keine Hausaufgaben eingetragen."}</div>`;
   }
   const groups = new Map();
   for (const h of visible) {
@@ -49,7 +51,16 @@ function homeworkView(data, hideDone) {
           <div class="row-sub">aufgegeben ${esc(shortDate(h.assigned || h.due))}${h.teacher ? ` · ${esc(h.teacher)}` : ""}${h.due_estimated ? " · Fälligkeit geschätzt" : ""}${h.eva ? ' · <span class="tag violet">EVA</span>' : ""}</div>
         </div>
       </li>`).join("");
-    return `<section class="section reveal" style="--i:${gi}"><h2 class="section-title">${esc(label)}<span class="aside">${groups.get(key).length}</span></h2><ul class="list">${rows}</ul></section>`;
+    const count = groups.get(key).length;
+    // Die Älteren sind meist erledigt oder vorbei: eingeklappt, damit die offenen Aufgaben oben bleiben
+    if (key === "older") {
+      return `
+        <details class="group section reveal" style="--i:${gi}" data-older ${olderOpen ? "open" : ""}>
+          <summary>${esc(label)}<span class="group-meta"><span>${count}</span>${icon("caret-right", "sm")}</span></summary>
+          <div class="group-body"><ul class="list">${rows}</ul></div>
+        </details>`;
+    }
+    return `<section class="section reveal" style="--i:${gi}"><h2 class="section-title">${esc(label)}<span class="aside">${count}</span></h2><ul class="list">${rows}</ul></section>`;
   }).join("");
 }
 
@@ -64,7 +75,7 @@ function examsView(data) {
   const upcoming = data.items.filter((e) => e.date >= today);
   const past = data.items.filter((e) => e.date < today).reverse().slice(0, 8);
   if (!upcoming.length && !past.length) {
-    return `<div class="empty reveal"><span class="serif">Keine Arbeiten</span>Im Moment sind keine Klassenarbeiten oder Tests eingetragen. Klausuren kannst du oben selbst eintragen.</div>`;
+    return `<div class="empty reveal"><span class="serif">Keine Arbeiten</span>Noch nichts eingetragen.</div>`;
   }
   const edit = (e) => (e.manual
     ? `<div class="exam-actions"><span class="own-tag">selbst eingetragen</span> <button class="btn ghost small" data-edit-exam="${esc(e.id)}">Bearbeiten</button></div>`
@@ -89,7 +100,7 @@ function examsView(data) {
       <div class="row-main"><div class="row-title">${esc(e.subject)}</div><div class="row-sub">${esc(e.type)} · ${esc(shortDate(e.date))}</div></div>
       ${e.manual ? `<button class="btn ghost small" data-edit-exam="${esc(e.id)}">Bearbeiten</button>` : ""}</li>`).join("");
   return `
-    ${upcoming.length ? `<ul class="list">${upcoming.map(card).join("")}</ul>` : `<div class="empty"><span class="serif">Nichts in Sicht</span>Keine kommenden Arbeiten eingetragen.</div>`}
+    ${upcoming.length ? `<ul class="list">${upcoming.map(card).join("")}</ul>` : `<div class="empty"><span class="serif">Nichts in Sicht</span>Keine kommenden Arbeiten.</div>`}
     ${past.length ? `<section class="section"><h2 class="section-title">Zuletzt geschrieben</h2><ul class="list">${pastRows}</ul></section>` : ""}`;
 }
 
@@ -110,7 +121,7 @@ function leavesView(data) {
   const upcoming = sorted.filter((l) => l.to >= today);
   const past = sorted.filter((l) => l.to < today).reverse().slice(0, 8);
   if (!upcoming.length && !past.length) {
-    return `<div class="empty reveal"><span class="serif">Keine Beurlaubungen</span>Trage hier ein, wenn die Schule dich freistellt. Dann weiß die App, dass du nicht hin musst, und schickt an diesen Tagen kein Morgen-Briefing.</div>`;
+    return `<div class="empty reveal"><span class="serif">Keine Beurlaubungen</span>Trage ein, wenn die Schule dich freistellt. Dann gibt es an diesen Tagen kein Briefing.</div>`;
   }
   const row = (l, i) => `
     <li class="row reveal" style="--i:${i}">
@@ -123,7 +134,7 @@ function leavesView(data) {
       <button class="btn ghost small" data-edit-leave="${esc(l.id)}">Bearbeiten</button>
     </li>`;
   return `
-    ${upcoming.length ? `<ul class="list">${upcoming.map(row).join("")}</ul>` : `<div class="empty"><span class="serif">Nichts geplant</span>Keine kommende Beurlaubung eingetragen.</div>`}
+    ${upcoming.length ? `<ul class="list">${upcoming.map(row).join("")}</ul>` : `<div class="empty"><span class="serif">Nichts geplant</span>Keine kommende Beurlaubung.</div>`}
     ${past.length ? `<section class="section"><h2 class="section-title">Vergangene</h2><ul class="list">${past.map(row).join("")}</ul></section>` : ""}`;
 }
 
@@ -148,11 +159,11 @@ function absenceRow(a, i) {
 function absencesView(data, onlyUnexcused) {
   if (!data.available) {
     const text = data.reason === "disabled"
-      ? "Deine Schule gibt die Fehlzeiten für Schüler nicht frei, oder das Klassenbuch ist dort nicht aktiv. Dann gibt es nichts abzurufen."
+      ? "Deine Schule gibt die Fehlzeiten nicht frei."
       : data.reason === "error"
-        ? `Der Abruf hat nicht geklappt (${esc(data.error)}). Die App versucht es später noch einmal.`
-        : "Die Fehlzeiten werden beim nächsten Abruf geladen. Das dauert höchstens ein paar Minuten.";
-    return `<div class="empty reveal"><span class="serif">Keine Fehlzeiten-Daten</span>${text}</div>`;
+        ? `Abruf fehlgeschlagen (${esc(data.error)}). Die App versucht es später erneut.`
+        : "Werden beim nächsten Abruf geladen, das dauert wenige Minuten.";
+    return `<div class="empty reveal"><span class="serif">Keine Fehlzeiten</span>${text}</div>`;
   }
   const totals = data.totals;
   const open = data.items.filter((a) => a.unexcused);
@@ -172,7 +183,7 @@ function absencesView(data, onlyUnexcused) {
       </div>
     </div>`);
   if (!data.has_list) {
-    parts.push(`<p class="muted reveal">Die Liste der einzelnen Fehlzeiten ist bei deiner Schule nicht abrufbar, hier steht nur die Statistik.</p>`);
+    parts.push(`<p class="muted reveal">Deine Schule gibt nur die Statistik frei, keine Einzelliste.</p>`);
   } else if (open.length) {
     parts.push(`<section class="section"><h2 class="section-title">Noch nicht entschuldigt<span class="aside">${open.length}</span></h2>
       <ul class="list">${open.map(absenceRow).join("")}</ul></section>`);
@@ -191,7 +202,7 @@ function absencesView(data, onlyUnexcused) {
           <tbody>${data.by_subject.map((s) => `<tr><td>${esc(s.subject)}</td><td class="num">${s.absent} von ${s.total}</td><td class="num">${s.unexcused}</td></tr>`).join("")}</tbody></table></div>
       </details>`);
   }
-  parts.push(`<p class="muted">Stand ${esc(timeAgo(data.fetched_at))}, laut Klassenbuch im Schulmanager.</p>`);
+  parts.push(`<p class="muted">Stand ${esc(timeAgo(data.fetched_at))}, laut Klassenbuch.</p>`);
   return `<div class="fz">${parts.join("")}</div>`;
 }
 
@@ -297,7 +308,6 @@ export async function editLeave(existing, ctx) {
 // ── Seite ────────────────────────────────────────────────────────────
 
 const LABELS = { hausaufgaben: "Hausaufgaben", klausuren: "Klausuren", beurlaubung: "Beurlaubung", fehlzeiten: "Fehlzeiten" };
-const HEADINGS = { hausaufgaben: "Haus&shy;aufgaben", klausuren: "Klassen&shy;arbeiten", beurlaubung: "Beur&shy;laubung", fehlzeiten: "Fehl&shy;zeiten" };
 
 export async function render(main, params, ctx) {
   const tab = TABS.includes(params.tab) ? params.tab : "hausaufgaben";
@@ -315,20 +325,14 @@ export async function render(main, params, ctx) {
 
   const hideDone = readPref("hideDone", false);
   const onlyUnexcused = readPref("onlyUnexcused", false);
-  const eyebrow = {
-    hausaufgaben: () => `${data.items.filter((h) => !h.done && h.due >= data.today).length} offen`,
-    klausuren: () => `${data.items.filter((e) => e.date >= data.today).length} anstehend`,
-    beurlaubung: () => `${data.leaves.filter((l) => l.to >= data.today).length} geplant`,
-    fehlzeiten: () => (data.available ? `${data.totals.unexcused} unentschuldigt` : "Klassenbuch"),
-  }[tab]();
   const actions = {
     hausaufgaben: `<button class="btn ghost small" data-action="toggle-done" aria-pressed="${hideDone}">${hideDone ? "Erledigte zeigen" : "Erledigte ausblenden"}</button>`,
-    klausuren: `<button class="btn small" data-action="add-exam">+ Klausur eintragen</button>`,
-    beurlaubung: `<button class="btn small" data-action="add-leave">+ Beurlaubung eintragen</button>`,
+    klausuren: `<button class="btn small" data-action="add-exam">+ Eintragen</button>`,
+    beurlaubung: `<button class="btn small" data-action="add-leave">+ Eintragen</button>`,
     fehlzeiten: data.available && data.has_list
       ? `<div class="segmented" role="group" aria-label="Anzeige">
           <button type="button" data-filter="all" aria-pressed="${!onlyUnexcused}">Alle</button>
-          <button type="button" data-filter="open" aria-pressed="${onlyUnexcused}">Nur offene</button>
+          <button type="button" data-filter="open" aria-pressed="${onlyUnexcused}">Offene</button>
         </div>`
       : "",
   };
@@ -339,17 +343,18 @@ export async function render(main, params, ctx) {
   }[tab]?.() ?? homeworkView(data, hideDone);
 
   main.innerHTML = `
-    <header class="view-head reveal">
-      <p class="eyebrow">${eyebrow}</p>
-      <h1 class="display">${HEADINGS[tab]}</h1>
+    <header class="page-head reveal">
+      <h1 class="page-title">Aufgaben</h1>
+      ${actions[tab]}
     </header>
-    <div class="daynav reveal" style="margin-bottom:8px">
-      <div class="segmented wide" role="group" aria-label="Ansicht">
-        ${TABS.map((t) => `<a href="#/aufgaben${t === "hausaufgaben" ? "" : query({ tab: t })}" ${tab === t ? 'aria-current="page"' : ""}>${LABELS[t]}</a>`).join("")}
-      </div>
-    </div>
-    ${actions[tab] ? `<div class="btn-row reveal" style="margin:14px 0 6px">${actions[tab]}</div>` : ""}
+    <nav class="tabs reveal" aria-label="Ansicht">
+      ${TABS.map((t) => `<a href="#/aufgaben${t === "hausaufgaben" ? "" : query({ tab: t })}" ${tab === t ? 'aria-current="page"' : ""}>${LABELS[t]}</a>`).join("")}
+    </nav>
     <div id="list">${body}</div>`;
+  main.querySelector('.tabs [aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
+  main.querySelector("[data-older]")?.addEventListener("toggle", (event) => {
+    olderOpen = event.currentTarget.open;
+  });
 
   main.querySelector("[data-action=toggle-done]")?.addEventListener("click", () => {
     writePref("hideDone", !hideDone);

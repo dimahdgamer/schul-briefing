@@ -4,7 +4,7 @@
 // sie werden deshalb direkt aus dem Cache bedient. Die Startseite und die API
 // kommen immer zuerst aus dem Netz, damit Updates und neue Daten sofort ankommen.
 
-const CACHE = "schule-v2";
+const CACHE = "schule-v3"; // v3: neues Logo unter /icons/, das alte darf nicht aus dem Cache kommen
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.add("/")).then(() => self.skipWaiting()));

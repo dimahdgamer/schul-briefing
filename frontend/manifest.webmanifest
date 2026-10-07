@@ -1,7 +1,7 @@
 {
   "name": "Schul-Briefing",
   "short_name": "Schule",
-  "description": "Stundenplan, Vertretungen, Hausaufgaben und Noten mit Morgen-Briefing.",
+  "description": "Stundenplan, Vertretungen und Hausaufgaben mit Morgen-Briefing.",
   "lang": "de",
   "start_url": "/#/heute",
   "scope": "/",

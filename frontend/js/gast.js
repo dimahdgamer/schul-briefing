@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { esc, timeAgo, toast } from "./ui.js";
+import { esc, logo, passwordField, timeAgo, toast, wirePasswordToggles } from "./ui.js";
 
 // Öffentliche Seiten für Freunde, ohne Anmeldung an der App:
 //   /einladung/<token>  Schulmanager-Login eingeben und den Kalender einrichten
@@ -13,9 +13,10 @@ const BASE = `/${encodeURIComponent(token || "")}`;
 function shell(inner) {
   root.innerHTML = `
     <main class="guest">
-      <div class="guest-brand"><span class="brand-mark" style="width:30px;height:30px;font-size:21px;border-radius:8px">S</span>Schulkalender</div>
+      <div class="guest-brand">${logo(30)}Schulkalender</div>
       ${inner}
     </main>`;
+  wirePasswordToggles(root);
 }
 
 function message(title, text) {
@@ -28,7 +29,7 @@ function loginForm({ submit, consent }) {
       <label class="field-label" for="g-email">Benutzername oder E-Mail bei Schulmanager</label>
       <input class="input" id="g-email" name="email" autocomplete="username" autocapitalize="none" spellcheck="false" required />
       <label class="field-label" for="g-pw">Passwort bei Schulmanager</label>
-      <input class="input" id="g-pw" name="password" type="password" autocomplete="current-password" required />
+      ${passwordField({ id: "g-pw" })}
       ${consent ? `<label class="guest-check"><input type="checkbox" name="consent" /><span>Ich bin damit einverstanden, dass mein Login so gespeichert und genutzt wird, wie oben beschrieben.</span></label>` : ""}
       <p class="form-error" role="alert"></p>
       <button class="btn primary" type="submit">${esc(submit)}</button>
@@ -80,25 +81,25 @@ async function invitePage() {
     <header class="reveal">
       <p class="eyebrow">Einladung</p>
       <h1 class="display">Hallo ${esc(info.label)}.</h1>
-      <p class="lede">Dein Stundenplan als Kalender im Handy, mit Vertretungen, Entfall, EVA und Klassenarbeiten. Das dauert eine Minute.</p>
+      <p class="lede">Dein Stundenplan als Kalender im Handy, mit Vertretungen, Entfall, EVA und Klassenarbeiten.</p>
     </header>
 
     <section class="card pad reveal" style="--i:1">
       <h2 class="guest-h">So funktioniert es</h2>
       <ol class="guest-list">
-        <li>Du gibst dein Schulmanager-Login ein. Die Seite prüft es sofort.</li>
-        <li>Mit dem Login werden regelmäßig dein Stundenplan, deine Klassenarbeiten und die Schultermine abgerufen.</li>
-        <li>Du bekommst einen Kalender-Link, den du im Handy abonnierst.</li>
+        <li>Du gibst dein Schulmanager-Login ein, die Seite prüft es sofort.</li>
+        <li>Damit werden regelmäßig Stundenplan, Klassenarbeiten und Schultermine abgerufen.</li>
+        <li>Du bekommst einen Kalender-Link zum Abonnieren.</li>
       </ol>
     </section>
 
     <section class="notice yellow reveal" style="--i:2;flex-direction:column;gap:6px">
       <strong>Das solltest du wissen</strong>
       <ul class="guest-list">
-        <li>Dein Passwort wird verschlüsselt auf dem Server gespeichert, der diese Seite betreibt. Wer diesen Server betreibt, kann es technisch trotzdem lesen. Gib es nur ein, wenn du ihm vertraust.</li>
-        <li>Es wird nichts anderes abgerufen: keine Nachrichten, keine Elternbriefe, keine Noten.</li>
-        <li>Du kannst jederzeit auf deiner Seite alles löschen. Danach ist dein Login weg.</li>
-        <li>Das ist kein Angebot von Schulmanager Online und keine offizielle App.</li>
+        <li>Dein Passwort wird verschlüsselt auf dem Server gespeichert, der diese Seite betreibt. Wer ihn betreibt, kann es technisch trotzdem lesen. Gib es nur ein, wenn du ihm vertraust.</li>
+        <li>Nichts anderes wird abgerufen: keine Nachrichten, Elternbriefe oder Noten.</li>
+        <li>Du kannst auf deiner Seite jederzeit alles löschen, dann ist dein Login weg.</li>
+        <li>Kein Angebot von Schulmanager Online und keine offizielle App.</li>
       </ul>
     </section>
 
@@ -118,10 +119,10 @@ function statusBlock(info) {
   const account = info.account || {};
   const who = [account.name, account.class ? `Klasse ${account.class}` : ""].filter(Boolean).join(" · ");
   if (info.state === "needs_login") {
-    return `<div class="notice red reveal"><p><strong>Dein Login funktioniert nicht mehr.</strong> Vielleicht hast du dein Passwort geändert. Gib es unten neu ein, dann geht es weiter. Bis dahin bleibt der Kalender auf dem letzten Stand.</p></div>`;
+    return `<div class="notice red reveal"><p><strong>Dein Login funktioniert nicht mehr.</strong> Hast du dein Passwort geändert? Gib es unten neu ein, bis dahin bleibt der Kalender auf dem letzten Stand.</p></div>`;
   }
   if (info.state === "waiting") {
-    return `<div class="notice blue reveal"><p><strong>Der erste Abruf steht noch aus.</strong> Das dauert höchstens ein paar Minuten, dann füllt sich der Kalender.</p></div>`;
+    return `<div class="notice blue reveal"><p><strong>Der erste Abruf steht noch aus.</strong> Der Kalender füllt sich in wenigen Minuten.</p></div>`;
   }
   return `<p class="muted reveal">${who ? `${esc(who)} · ` : ""}zuletzt aktualisiert ${esc(timeAgo(info.last_success))}</p>`;
 }
@@ -151,12 +152,12 @@ function uiBlock(info) {
     return `
       <section class="card pad reveal" style="--i:3">
         <h2 class="guest-h">App-Oberfläche für dich</h2>
-        <p style="margin:0 0 10px">Dein Freund bietet dir seine App an: dein Stundenplan mit Vertretungen, Hausaufgaben, Klausuren und Fehlzeiten, ein Morgen-Briefing und Benachrichtigungen auf dem Handy, dazu eigene Einträge für Klausuren und Beurlaubungen.</p>
+        <p style="margin:0 0 10px">Dein Freund bietet dir seine App an: Stundenplan mit Vertretungen, Hausaufgaben, Klausuren und Fehlzeiten, dazu Morgen-Briefing und Benachrichtigungen auf dem Handy.</p>
         <ul class="guest-list">
-          <li>Dafür ruft die App zusätzlich deine Hausaufgaben und, falls deine Schule sie freigibt, deine Fehlzeiten ab. Nachrichten und Elternbriefe werden nie abgerufen.</li>
+          <li>Dafür ruft die App zusätzlich deine Hausaufgaben und, wenn die Schule sie freigibt, deine Fehlzeiten ab. Nachrichten und Elternbriefe nie.</li>
           <li>Du meldest dich mit einem eigenen Zugangscode an, den du hier bekommst.</li>
-          <li>Dein Kalender-Link bleibt genau, wie er ist.</li>
-          <li>Du kannst die Oberfläche hier jederzeit wieder abschalten. Dann werden die zusätzlichen Daten gelöscht.</li>
+          <li>Dein Kalender-Link bleibt, wie er ist.</li>
+          <li>Du kannst die Oberfläche hier jederzeit abschalten, die zusätzlichen Daten werden dann gelöscht.</li>
         </ul>
         <div class="btn-row" style="margin-top:14px"><button class="btn primary" type="button" data-action="ui-activate">Oberfläche aktivieren</button></div>
       </section>`;
@@ -165,7 +166,7 @@ function uiBlock(info) {
     return `
       <section class="card pad reveal" style="--i:3">
         <h2 class="guest-h">Deine App</h2>
-        <p style="margin:0 0 10px">Öffne die App-Adresse und melde dich mit deinem Zugangscode an. Der Code ist nur für dich, gib ihn nicht weiter.</p>
+        <p style="margin:0 0 10px">Öffne die App und melde dich mit deinem Zugangscode an. Der Code ist nur für dich.</p>
         <div class="field-label">Zugangscode</div>
         <div class="copy-field" style="margin:6px 0 12px">
           <input class="input" readonly value="${esc(info.code || "")}" aria-label="Zugangscode" id="g-code" style="letter-spacing:0.08em" />
@@ -198,7 +199,7 @@ function manageBlock(info) {
           <button class="btn small" type="button" data-action="delete">Alles löschen</button>
         </div>
         <div id="g-login" hidden style="margin-top:14px">${loginForm({ submit: "Login speichern" })}</div>`}
-      <p class="field-help" style="margin-top:12px">Speichere diese Seite als Lesezeichen, sie ist dein Zugang. Der Link ist geheim: Wer ihn kennt, kann deinen Kalender-Link ändern oder alles löschen.</p>
+      <p class="field-help" style="margin-top:12px">Speichere diese Seite als Lesezeichen, sie ist dein Zugang. Wer den Link kennt, kann deine Daten ändern oder löschen.</p>
     </section>`;
 }
 

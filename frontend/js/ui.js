@@ -13,6 +13,41 @@ export function icon(name, cls = "") {
   return `<svg class="icon ${cls}" aria-hidden="true"><use href="${SPRITE}#i-${name}"></use></svg>`;
 }
 
+// Das Logo: ein S aus Stundenplan-Kacheln, die mittlere ist die aktuelle Stunde. Quelle: icons/logo.svg
+const LOGO_CELLS = [[0, 0], [1, 0], [2, 0], [0, 1], [0, 2], [1, 2], [2, 2], [2, 3], [0, 4], [1, 4], [2, 4]];
+
+export function logo(size = 30) {
+  const cells = LOGO_CELLS.map(([c, r]) => {
+    const hit = c === 1 && r === 2;
+    return `<rect class="${hit ? "hit" : "cell"}" x="${137 + c * 84}" y="${98 + r * 66}" width="70" height="52" rx="16"/>`;
+  }).join("");
+  return `<svg class="logo" viewBox="0 0 512 512" width="${size}" height="${size}" aria-hidden="true"><rect class="bg" width="512" height="512" rx="116"/>${cells}</svg>`;
+}
+
+// Passwortfeld mit Auge-Knopf zum Anzeigen. Danach wirePasswordToggles(root) aufrufen.
+export function passwordField({ id, placeholder = "", autocomplete = "current-password", name = "password" }) {
+  return `
+    <div class="pw">
+      <input class="input" id="${esc(id)}" name="${esc(name)}" type="password" autocomplete="${esc(autocomplete)}" autocapitalize="none" autocorrect="off" spellcheck="false"${placeholder ? ` placeholder="${esc(placeholder)}"` : ""} required />
+      <button type="button" class="pw-toggle" data-pw-toggle aria-pressed="false" aria-label="Passwort anzeigen" aria-controls="${esc(id)}">${icon("eye")}${icon("eye-slash")}</button>
+    </div>`;
+}
+
+export function wirePasswordToggles(root) {
+  root.querySelectorAll("[data-pw-toggle]").forEach((button) => {
+    const input = root.querySelector(`#${button.getAttribute("aria-controls")}`);
+    // Der Knopf soll das Feld nicht verlassen lassen, sonst klappt auf dem Handy die Tastatur zu
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      button.setAttribute("aria-pressed", String(show));
+      button.setAttribute("aria-label", show ? "Passwort verbergen" : "Passwort anzeigen");
+      input.focus({ preventScroll: true });
+    });
+  });
+}
+
 export const WEEKDAYS = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
 export const WEEKDAYS_SHORT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 export const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
@@ -145,8 +180,7 @@ export function toast(message, kind = "info", ms = 2800) {
 export function skeleton(rows = 4) {
   return `
     <div class="view-head">
-      <div class="skeleton" style="width:140px;height:14px;border-radius:4px"></div>
-      <div class="skeleton" style="width:72%;height:48px;margin-top:12px;border-radius:8px"></div>
+      <div class="skeleton" style="width:60%;height:44px;margin-top:44px;border-radius:8px"></div>
     </div>
     ${Array.from({ length: rows }, () => '<div class="skeleton" style="height:64px;margin-bottom:10px"></div>').join("")}
   `;

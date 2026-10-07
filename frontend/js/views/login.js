@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { logo, passwordField, wirePasswordToggles } from "../ui.js";
 
 function greeting() {
   const hour = new Date().getHours();
@@ -11,18 +12,18 @@ export async function render(root, params, ctx) {
   root.innerHTML = `
     <main class="login">
       <div class="login-card reveal">
-        <span class="brand-mark" style="width:44px;height:44px;font-size:30px;border-radius:11px">S</span>
+        ${logo(48)}
         <h1 class="display">${greeting()}</h1>
-        <p class="lede" style="margin-top:4px">Melde dich an, um Stundenplan, Vertretungen und Hausaufgaben zu sehen.</p>
         <form novalidate>
           <label class="visually-hidden" for="pw">Passwort</label>
-          <input class="input" id="pw" name="password" type="password" autocomplete="current-password" placeholder="Passwort oder Zugangscode" required />
+          ${passwordField({ id: "pw", placeholder: "Passwort oder Zugangscode" })}
           <p class="form-error" role="alert"></p>
           <button class="btn primary" type="submit">Anmelden</button>
         </form>
       </div>
     </main>`;
 
+  wirePasswordToggles(root);
   const form = root.querySelector("form");
   if (window.matchMedia("(pointer: fine)").matches) form.password.focus();
   const error = root.querySelector(".form-error");

@@ -46,10 +46,9 @@ export async function render(main, params, ctx) {
   const unreadMessages = data.threads.reduce((n, t) => n + t.unread, 0);
 
   main.innerHTML = `
-    <header class="view-head reveal">
-      <p class="eyebrow">${unreadLetters + unreadMessages ? `${unreadLetters + unreadMessages} ungelesen` : "Alles gelesen"}</p>
-      <h1 class="display">Post</h1>
-      <p class="lede">Briefe und Nachrichten öffnen sich in Schulmanager. Erst dort gelten sie als gelesen.</p>
+    <header class="page-head reveal">
+      <h1 class="page-title">Post</h1>
+      ${unreadLetters + unreadMessages ? `<span class="aside">${unreadLetters + unreadMessages} ungelesen</span>` : ""}
     </header>
     <section class="section reveal" style="--i:1">
       <h2 class="section-title">Elternbriefe <span class="aside">${data.letters.length}</span></h2>
@@ -58,5 +57,6 @@ export async function render(main, params, ctx) {
     <section class="section reveal" style="--i:2">
       <h2 class="section-title">Nachrichten <span class="aside">${data.threads.length}</span></h2>
       ${data.threads.length ? `<ul class="list">${data.threads.slice(0, 30).map(threadRow).join("")}</ul>` : '<div class="empty">Keine Nachrichten vorhanden.</div>'}
-    </section>`;
+    </section>
+    <p class="foot-status">Öffnet in Schulmanager, erst dort gilt ein Brief als gelesen.</p>`;
 }

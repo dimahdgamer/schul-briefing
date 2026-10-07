@@ -1,20 +1,17 @@
 import { api } from "../api.js";
 import { editCourse } from "../forms.js";
 import {
-  errorState, esc, icon, inDays, longDate, minutesOf, plural, query, relativeDay,
+  errorState, esc, icon, inDays, minutesOf, plural, query, relativeDay,
   shortDate, skeleton, stateTag, timeAgo, toast,
 } from "../ui.js";
 
 export const title = "Heute";
 
-function lede(day, data) {
-  const brk = day.break;
+// Nur für Tage, an denen die Zahlen unten nicht reichen. Ferien und Wochenende erklärt die Karte darunter.
+function lede(day) {
   if (day.full_leave && day.school_day) return "Du bist beurlaubt und musst nicht in die Schule.";
   if (!day.lessons.length) {
-    if (brk && brk.kind !== "weekend") {
-      return `${esc(brk.name)}. Die Schule beginnt wieder am ${esc(longDate(brk.back))}.`;
-    }
-    if (brk) return `Wochenende. Weiter geht es am ${esc(longDate(brk.back))}.`;
+    if (day.break) return "";
     if (!day.in_window) return "Für diesen Tag liegen noch keine Stundenplandaten vor.";
     return "Für diesen Tag ist kein Unterricht eingetragen.";
   }
@@ -22,17 +19,7 @@ function lede(day, data) {
     if (day.lessons.some((l) => l.state === "leave")) return "Du bist beurlaubt und musst nicht in die Schule.";
     return day.has_eva ? "Nur EVA oder Entfall, du musst nicht in die Schule." : "Der gesamte Unterricht fällt aus.";
   }
-  const parts = [];
-  if (day.late_start && day.first_lesson) {
-    const out = day.has_eva ? "fallen aus oder sind EVA" : "fallen aus";
-    parts.push(`Die ersten Stunden ${out}, du musst erst um <span class="mono">${esc(day.start)}</span> da sein.`);
-  } else {
-    parts.push(`Unterricht von <span class="mono">${esc(day.start)}</span> bis <span class="mono">${esc(day.end)}</span> Uhr.`);
-  }
-  if (day.early_end) parts.push(`Früher Schluss um <span class="mono">${esc(day.end)}</span>.`);
-  const n = day.changes.length;
-  parts.push(n ? `${plural(n, "Änderung", "Änderungen")} im Plan.` : "Alles nach Plan.");
-  return parts.join(" ");
+  return "";
 }
 
 function lessonRow(lesson, index) {
@@ -87,48 +74,16 @@ function lessonList(lessons) {
   return `<ol class="lessons" aria-label="Stunden">${rows.join("")}</ol>`;
 }
 
-function tiles(day, data) {
-  const active = day.lessons.filter((l) => !isFree(l));
-  const startNote = day.late_start
-    ? `statt ${esc(day.planned_start)}`
-    : day.first_lesson
-      ? `${esc(day.first_lesson.subject)}${day.first_lesson.room ? ` · ${esc(day.first_lesson.room)}` : ""}`
-      : "";
-  // Eine Doppelstunde ist eine Zeile, zählt aber als zwei Stunden
-  const lessonCount = active.reduce((n, l) => n + (l.lesson_count || 1), 0);
-  const endNote = day.early_end ? `statt ${esc(day.planned_end)}` : plural(lessonCount, "Stunde", "Stunden");
-  const changeTags = [...new Set(day.changes.map((c) => c.state))].map(stateTag).join(" ");
-  const hwOpen = day.homework_due.filter((h) => !h.done);
-  // Die nächste Arbeit gesehen vom angezeigten Tag, nicht von heute: sonst steht dort "vor 2 Tagen"
-  const exam = day.exams_today[0] || day.exams_upcoming[0] || (data.next_exam && data.next_exam.date >= day.date ? data.next_exam : null);
-
+// Beginn, Schluss und Zahl der Änderungen in einer Zeile. Was sich geändert hat, steht an den Stunden selbst.
+function glance(day) {
+  const n = day.changes.length;
+  const start = day.late_start ? `Beginn <em>statt ${esc(day.planned_start)}</em>` : "Beginn";
+  const end = day.early_end ? `Schluss <em>statt ${esc(day.planned_end)}</em>` : "Schluss";
   return `
-    <div class="bento">
-      <div class="tile wide reveal" style="--i:1">
-        <span class="tile-label">Beginn ${day.late_start ? '<span class="tag yellow">später</span>' : ""}</span>
-        <span class="tile-value hero">${esc(day.start || "–")}</span>
-        <span class="tile-note">${startNote}</span>
-      </div>
-      <div class="tile reveal" style="--i:2">
-        <span class="tile-label">Schluss ${day.early_end ? '<span class="tag green">früher</span>' : ""}</span>
-        <span class="tile-value">${esc(day.end || "–")}</span>
-        <span class="tile-note">${endNote}</span>
-      </div>
-      <div class="tile reveal" style="--i:3">
-        <span class="tile-label">Änderungen</span>
-        <span class="tile-value">${day.changes.length}</span>
-        <span class="tile-note">${changeTags || "Alles nach Plan"}</span>
-      </div>
-      <a class="tile reveal" style="--i:4" href="#/aufgaben">
-        <span class="tile-label">Hausaufgaben fällig</span>
-        <span class="tile-value">${hwOpen.length}</span>
-        <span class="tile-note">${hwOpen.length ? esc([...new Set(hwOpen.map((h) => h.subject))].join(", ")) : "Nichts offen"}</span>
-      </a>
-      <a class="tile reveal" style="--i:5" href="#/aufgaben?tab=klausuren">
-        <span class="tile-label">Nächste Arbeit</span>
-        <span class="tile-value" style="font-size:22px;line-height:1.2">${exam ? esc(exam.subject) : "Keine"}</span>
-        <span class="tile-note">${exam ? `${esc(exam.type)} · ${esc(inDays(exam.date, day.date))}` : "In den nächsten Wochen nichts eingetragen"}</span>
-      </a>
+    <div class="glance reveal" style="--i:1">
+      <div><span class="glance-value">${esc(day.start || "–")}</span><span class="glance-key">${start}</span></div>
+      <div><span class="glance-value">${esc(day.end || "–")}</span><span class="glance-key">${end}</span></div>
+      <div><span class="glance-value ${n ? "is-alert" : ""}">${n}</span><span class="glance-key">${n === 1 ? "Änderung" : "Änderungen"}</span></div>
     </div>`;
 }
 
@@ -161,7 +116,7 @@ function evaSection(day) {
   }).join("");
   return `
     <section class="section reveal" style="--i:5">
-      <h2 class="section-title">EVA-Aufgaben <a class="aside" href="#/aufgaben">alle</a></h2>
+      <h2 class="section-title">EVA-Aufgaben <a class="aside" href="#/aufgaben">Alle</a></h2>
       <ul class="list">${rows}</ul>
     </section>`;
 }
@@ -173,14 +128,16 @@ function homeworkSection(day) {
   const items = due.map((h) => taskRow(h)).join("");
   return `
     <section class="section reveal" style="--i:6">
-      <h2 class="section-title">Hausaufgaben für diesen Tag <a class="aside" href="#/aufgaben">alle</a></h2>
+      <h2 class="section-title">Hausaufgaben <a class="aside" href="#/aufgaben">Alle</a></h2>
       <ul class="list">${items}</ul>
     </section>`;
 }
 
-function examsSection(day) {
-  const upcoming = day.exams_upcoming.filter((e) => e.date !== day.date).slice(0, 3);
+function examsSection(day, data) {
+  let upcoming = day.exams_upcoming.filter((e) => e.date !== day.date).slice(0, 3);
   const today = day.exams_today;
+  // Liegt die nächste Arbeit weiter weg als das Vorschaufenster, soll sie trotzdem hier stehen
+  if (!today.length && !upcoming.length && data.next_exam && data.next_exam.date > day.date) upcoming = [data.next_exam];
   if (!today.length && !upcoming.length) return "";
   const row = (e, highlight) => `
     <li><a class="row" href="#/aufgaben?tab=klausuren">
@@ -252,13 +209,13 @@ function statusNotice(status) {
 function absenceNotice(data) {
   const n = data.unexcused_absences || 0;
   if (!n) return "";
-  return `<a class="notice yellow reveal" href="#/aufgaben?tab=fehlzeiten" style="margin-bottom:12px;text-decoration:none">${icon("warning-circle")}<p><strong>${plural(n, "Fehlzeit", "Fehlzeiten")} noch nicht entschuldigt.</strong> Im Klassenbuch ansehen</p></a>`;
+  return `<a class="notice yellow reveal" href="#/aufgaben?tab=fehlzeiten" style="margin-bottom:12px;text-decoration:none;align-items:center">${icon("warning-circle")}<p style="flex:1"><strong>${plural(n, "Fehlzeit", "Fehlzeiten")} nicht entschuldigt</strong></p>${icon("caret-right", "sm")}</a>`;
 }
 
 // Solange noch gar kein eigener Unterricht eingetragen ist, gleich dort anbieten, wo man ihn vermisst
 function courseHint(data) {
   if (data.has_courses) return "";
-  return `<p class="muted reveal" style="margin:14px 0 0">Fehlt Unterricht, den der Schulmanager nicht kennt (z. B. ein Kurs an einer anderen Schule)? <button type="button" class="btn small" style="margin-top:8px" data-action="add-course">+ Eigenen Unterricht eintragen</button></p>`;
+  return `<p class="reveal" style="margin:6px 0 0"><button type="button" class="link-btn" data-action="add-course">+ Eigenen Unterricht eintragen</button></p>`;
 }
 
 function leaveNotice(day) {
@@ -312,33 +269,37 @@ export async function render(main, params, ctx) {
     `<span>${esc(relativeDay(day.date, data.today))}</span>`,
     account.class ? `<span>· Klasse ${esc(account.class)}</span>` : "",
     data.status.demo ? '<span class="tag yellow">Demo</span>' : "",
+    isToday ? "" : `<a href="#/heute">Zu heute</a>`,
   ].join("");
   const [weekday, rest] = day.label.split(", ");
+  const stepLabel = (what, iso) => `${what}, ${shortDate(iso)}`;
   const nav = `
-    <nav class="daynav reveal" aria-label="Tag wechseln">
-      <a class="btn ghost" href="#/heute${query({ date: data.prev_school_day })}" aria-label="Vorheriger Schultag">${icon("arrow-left", "sm")} ${esc(shortDate(data.prev_school_day))}</a>
-      ${isToday ? "" : `<a class="btn ghost" href="#/heute${query({ date: data.today })}">Heute</a>`}
-      <a class="btn ghost" href="#/heute${query({ date: data.following_school_day })}" aria-label="Nächster Schultag">${esc(shortDate(data.following_school_day))} ${icon("arrow-right", "sm")}</a>
-    </nav>`;
+    <div class="day-bar reveal">
+      <p class="eyebrow">${eyebrow}</p>
+      <nav class="stepper" aria-label="Tag wechseln">
+        <a class="icon-btn" href="#/heute${query({ date: data.prev_school_day })}" aria-label="${esc(stepLabel("Vorheriger Schultag", data.prev_school_day))}">${icon("arrow-left")}</a>
+        <a class="icon-btn" href="#/heute${query({ date: data.following_school_day })}" aria-label="${esc(stepLabel("Nächster Schultag", data.following_school_day))}">${icon("arrow-right")}</a>
+      </nav>
+    </div>`;
 
   const holiday = data.holidays.find((h) => h.kind === "school" && h.start > data.today);
   const holidayLine = holiday ? `<span>${esc(holiday.name)} ${esc(inDays(holiday.start, data.today))}</span>` : "";
 
+  const intro = lede(day);
   main.innerHTML = `
     ${nav}
     <header class="view-head reveal">
-      <p class="eyebrow">${eyebrow}</p>
       <h1 class="display">${esc(weekday)}, <em>${esc(rest)}</em></h1>
-      <p class="lede">${lede(day, data)}</p>
+      ${intro ? `<p class="lede">${esc(intro)}</p>` : ""}
     </header>
     ${statusNotice(data.status)}
     ${absenceNotice(data)}
     ${leaveNotice(day)}
     ${breakCard(day, data)}
-    ${day.lessons.length ? tiles(day, data) : ""}
-    ${day.lessons.length ? `<section class="section"><h2 class="section-title">Stunden <span class="aside">${esc(day.planned_start)}–${esc(day.planned_end)}</span></h2>${lessonList(day.lessons)}${courseHint(data)}</section>` : ""}
+    ${day.lessons.length ? glance(day) : ""}
+    ${day.lessons.length ? `<section class="section"><h2 class="section-title">Stunden</h2>${lessonList(day.lessons)}${courseHint(data)}</section>` : ""}
     ${evaSection(day)}
-    ${examsSection(day)}
+    ${examsSection(day, data)}
     ${homeworkSection(day)}
     ${eventsSection(day)}
     ${inboxSection(data)}

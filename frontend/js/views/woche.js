@@ -52,19 +52,25 @@ export async function render(main, params, ctx) {
   const changes = data.days.reduce((n, d) => n + d.lessons.filter((l) => !["regular", "leave"].includes(l.state)).length, 0);
   const fmt = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.`;
 
+  const eyebrow = [
+    `<span>KW ${isoWeek(monday)} · ${fmt(monday)}–${fmt(friday)}</span>`,
+    changes ? `<span>· ${changes} ${changes === 1 ? "Änderung" : "Änderungen"}</span>` : "",
+    monday !== thisMonday ? `<a href="#/woche">Zu dieser Woche</a>` : "",
+  ].join("");
+
   main.innerHTML = `
-    <nav class="daynav reveal" aria-label="Woche wechseln">
-      <a class="btn ghost" href="#/woche${query({ start: addDays(monday, -7) })}">${icon("arrow-left", "sm")} Vorherige</a>
-      ${monday !== thisMonday ? `<a class="btn ghost" href="#/woche">Diese Woche</a>` : ""}
-      <a class="btn ghost" href="#/woche${query({ start: addDays(monday, 7) })}">Nächste ${icon("arrow-right", "sm")}</a>
-    </nav>
+    <div class="day-bar reveal">
+      <p class="eyebrow">${eyebrow}</p>
+      <nav class="stepper" aria-label="Woche wechseln">
+        <a class="icon-btn" href="#/woche${query({ start: addDays(monday, -7) })}" aria-label="Vorherige Woche">${icon("arrow-left")}</a>
+        <a class="icon-btn" href="#/woche${query({ start: addDays(monday, 7) })}" aria-label="Nächste Woche">${icon("arrow-right")}</a>
+      </nav>
+    </div>
     <header class="view-head reveal">
-      <p class="eyebrow"><span>KW ${isoWeek(monday)}</span><span>· ${fmt(monday)}–${fmt(friday)}</span>${data.source === "live" ? '<span class="tag blue">live geladen</span>' : ""}</p>
       <h1 class="display">${monday === thisMonday ? "Diese Woche" : monday > thisMonday ? "Kommende Woche" : "Vergangene Woche"}</h1>
-      <p class="lede">${changes ? `${changes} ${changes === 1 ? "Änderung" : "Änderungen"} gegenüber dem regulären Plan.` : "Keine Änderungen gegenüber dem regulären Plan."}</p>
     </header>
     <div class="week">${data.days.map((d, i) => dayColumn(d, data.today, i)).join("")}</div>
-    ${data.has_courses ? "" : `<p class="muted" style="margin-top:22px">Fehlt Unterricht, den der Schulmanager nicht kennt (z. B. ein Kurs an einer anderen Schule)? <button type="button" class="btn small" style="margin-top:8px" data-action="add-course">+ Eigenen Unterricht eintragen</button></p>`}`;
+    ${data.has_courses ? "" : `<p style="margin:14px 0 0"><button type="button" class="link-btn" data-action="add-course">+ Eigenen Unterricht eintragen</button></p>`}`;
   main.querySelector("[data-action=add-course]")?.addEventListener("click", () => editCourse(null, ctx));
 
   if (monday === thisMonday && window.matchMedia("(max-width: 959px)").matches) {

@@ -57,13 +57,12 @@ export async function render(main, params, ctx) {
   let items = data.items;
 
   main.innerHTML = `
-    <header class="view-head reveal">
-      <p class="eyebrow">${data.unseen ? `${data.unseen} neu` : "Alles gesehen"}</p>
-      <h1 class="display">Verlauf</h1>
-      <p class="lede">Jede erkannte Änderung, jedes Briefing und jede Erinnerung, die neuesten zuerst.</p>
+    <header class="page-head reveal">
+      <h1 class="page-title">Verlauf</h1>
+      ${data.unseen ? `<span class="aside">${data.unseen} neu</span>` : ""}
     </header>
     <div id="timeline" class="reveal" style="--i:1">
-      ${items.length ? rows(items, todayIso) : '<div class="empty"><span class="serif">Noch ruhig</span>Sobald sich im Schulmanager etwas ändert, steht es hier.</div>'}
+      ${items.length ? rows(items, todayIso) : '<div class="empty"><span class="serif">Noch ruhig</span>Änderungen im Schulmanager erscheinen hier.</div>'}
     </div>
     ${items.length >= 40 ? '<div class="btn-row" style="justify-content:center;margin-top:20px"><button class="btn" data-action="more">Ältere laden</button></div>' : ""}`;
 

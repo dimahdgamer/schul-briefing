@@ -42,6 +42,17 @@ function applyTheme(theme) {
   else document.documentElement.dataset.theme = theme;
 }
 
+// Welche Bereiche aufgeklappt sind, merkt sich die Seite, solange die App offen ist (auch über Neuladen der Ansicht)
+const openGroups = new Set(["benachrichtigungen"]);
+
+function group(key, title, body) {
+  return `
+    <details class="group reveal" data-group="${key}" ${openGroups.has(key) ? "open" : ""}>
+      <summary>${title}${icon("caret-right", "sm")}</summary>
+      <div class="group-body">${body}</div>
+    </details>`;
+}
+
 const toggle = (key, s, label) => `<input type="checkbox" class="switch" data-setting="${key}" ${s[key] ? "checked" : ""} aria-label="${esc(label)}" />`;
 const time = (key, s, label) => `<input type="time" class="input" data-setting="${key}" value="${esc(s[key])}" step="300" aria-label="${esc(label)}" />`;
 
@@ -49,7 +60,7 @@ function pushSection(state) {
   let body;
   if (!pushSupported()) {
     body = isIos() && !isStandalone()
-      ? `<div class="notice yellow">${icon("push-pin")}<p><strong>Auf dem iPhone:</strong> Unten auf <kbd>Teilen</kbd> tippen, dann <kbd>Zum Home-Bildschirm</kbd>. Danach die App vom Home-Bildschirm öffnen und hier die Benachrichtigungen aktivieren (ab iOS 16.4).</p></div>`
+      ? `<div class="notice yellow">${icon("push-pin")}<p><strong>Auf dem iPhone:</strong> Unten auf <kbd>Teilen</kbd> tippen, dann <kbd>Zum Home-Bildschirm</kbd>. Die App von dort öffnen und hier Benachrichtigungen aktivieren (ab iOS 16.4).</p></div>`
       : `<div class="notice">${icon("warning-circle")}<p>Dieser Browser unterstützt keine Push-Benachrichtigungen.</p></div>`;
     return `<div class="card pad">${body}</div>`;
   }
@@ -60,12 +71,12 @@ function pushSection(state) {
       <div class="field">
         <div>
           <div class="field-label">${active ? "Auf diesem Gerät aktiv" : "Auf diesem Gerät aus"}</div>
-          <div class="field-help">${denied ? "Benachrichtigungen sind im Browser blockiert. Bitte in den Website- bzw. Systemeinstellungen erlauben." : `${state.devices} ${state.devices === 1 ? "Gerät" : "Geräte"} insgesamt registriert`}</div>
+          <div class="field-help">${denied ? "Im Browser blockiert. Bitte in den Website- bzw. Systemeinstellungen erlauben." : `${state.devices} ${state.devices === 1 ? "Gerät" : "Geräte"} registriert`}</div>
         </div>
         <button class="btn ${active ? "" : "primary"} small" data-action="${active ? "push-off" : "push-on"}" ${denied ? "disabled" : ""}>${active ? "Deaktivieren" : "Aktivieren"}</button>
       </div>
       <div class="field">
-        <div><div class="field-label">Testnachricht</div><div class="field-help">Schickt sofort eine Nachricht an alle Geräte.</div></div>
+        <div><div class="field-label">Testnachricht</div><div class="field-help">An alle Geräte</div></div>
         <button class="btn small" data-action="push-test">${icon("bell-ringing", "sm")}Senden</button>
       </div>
     </div>`;
@@ -86,7 +97,7 @@ function briefingSection(s, status, bell) {
   return `
     <div class="card">
       <div class="field">
-        <div><div class="field-label">Briefing am Morgen</div><div class="field-help">Nur an Schultagen, nicht in den Ferien</div></div>
+        <div><div class="field-label">Briefing am Morgen</div><div class="field-help">Nur an Schultagen</div></div>
         ${toggle("briefing_enabled", s, "Briefing am Morgen")}
       </div>
       <div class="field">
@@ -97,7 +108,7 @@ function briefingSection(s, status, bell) {
         </div>
       </div>
       <div class="field stack" id="briefing-auto" ${auto ? "" : "hidden"}>
-        <div class="field-help">Das Briefing kommt abhängig davon, zu welcher Stunde du laut Plan anfängst. Fällt die erste Stunde aus, gilt trotzdem ihre Uhrzeit, damit du es rechtzeitig erfährst.</div>
+        <div class="field-help">Je nach erster Stunde laut Plan. Fällt sie aus, gilt trotzdem ihre Uhrzeit. Ohne eingetragenen Unterricht gilt die feste Uhrzeit.</div>
         <div class="hour-grid">
           ${hours.map((h) => `
             <label class="hour-cell">
@@ -105,7 +116,6 @@ function briefingSection(s, status, bell) {
               <input type="time" class="input" data-hour="${esc(h.hour)}" value="${esc(s.briefing_by_hour[h.hour])}" step="300" aria-label="Briefing bei Beginn zur ${esc(h.hour)}. Stunde" />
             </label>`).join("")}
         </div>
-        <div class="field-help">Ist an einem Schultag kein Unterricht eingetragen, gilt die feste Uhrzeit.</div>
       </div>
       <div class="field" id="briefing-fixed">
         <div class="field-label">${auto ? "Feste Uhrzeit (Ersatz)" : "Feste Uhrzeit"}</div>
@@ -113,7 +123,7 @@ function briefingSection(s, status, bell) {
       </div>
       <div class="field"><div class="field-help" id="next-briefing">${nextBriefingText(status.next_briefing, s.briefing_enabled)}</div></div>
       <div class="field">
-        <div><div class="field-label">Abend-Vorschau</div><div class="field-help">Am Vorabend eines Schultags, auch Sonntagabend</div></div>
+        <div><div class="field-label">Abend-Vorschau</div><div class="field-help">Am Vorabend eines Schultags</div></div>
         ${toggle("evening_enabled", s, "Abend-Vorschau")}
       </div>
       <div class="field"><div class="field-label">Uhrzeit</div>${time("evening_time", s, "Uhrzeit Abend-Vorschau")}</div>
@@ -150,7 +160,7 @@ function coursesSection(own) {
   return `
     <div class="card">
       <div class="field stack">
-        <div class="field-help">Unterricht, den der Schulmanager nicht kennt, zum Beispiel ein Kurs an einer anderen Schule. Er steht jede Woche im Plan und zählt für den Schluss. In Schulferien und an Feiertagen fällt er aus, an schulfreien Tagen nur deiner Schule (z. B. Lehrertag) nicht. Eine Beurlaubung betrifft ihn auch.</div>
+        <div class="field-help">Unterricht, den der Schulmanager nicht kennt, z. B. ein Kurs an einer anderen Schule. Er steht jede Woche im Plan und zählt für den Schluss. In Ferien und an Feiertagen fällt er aus, eine Beurlaubung gilt auch für ihn.</div>
       </div>
       ${rows}
       <div class="field"><button class="btn small" data-action="add-course">+ Eigenen Unterricht eintragen</button></div>
@@ -172,8 +182,8 @@ function friendsSection(data) {
   const share = typeof navigator.share === "function";
   const uiHelp = {
     off: "Nur der Kalender-Link.",
-    offered: "Du hast die Oberfläche angeboten. Sie wird erst aktiv, wenn dein Freund auf seiner Seite zustimmt.",
-    on: "Dein Freund nutzt seine eigene App mit eigenem Zugangscode.",
+    offered: "Angeboten. Wird aktiv, sobald dein Freund zustimmt.",
+    on: "Nutzt die eigene App mit eigenem Zugangscode.",
   };
   const friends = data.friends.map((f) => `
     <div class="field stack">
@@ -204,7 +214,7 @@ function friendsSection(data) {
   return `
     <div class="card">
       <div class="field stack">
-        <div class="field-help">Freunde bekommen ihren Stundenplan als Kalender-Link. Du schickst ihnen einen Einladungslink, dort geben sie ihr Schulmanager-Login selbst ein. Du siehst es nie. Abgerufen werden nur Stundenplan, Klassenarbeiten und Schultermine, etwa einmal pro Stunde. Optional kannst du einem Freund eine eigene App-Oberfläche anbieten. Sie wird erst aktiv, wenn er auf seiner Seite zustimmt, und ruft dann zusätzlich Hausaufgaben und Fehlzeiten ab.</div>
+        <div class="field-help">Freunde bekommen ihren Stundenplan als Kalender-Link. Über deinen Einladungslink geben sie ihr Schulmanager-Login selbst ein, du siehst es nie. Abgerufen werden Stundenplan, Klassenarbeiten und Schultermine, etwa stündlich. Eine eigene App-Oberfläche kannst du anbieten, sie wird erst aktiv, wenn dein Freund zustimmt, und ruft dann auch Hausaufgaben und Fehlzeiten ab.</div>
       </div>
       ${friends}${invites}
       ${!friends && !invites ? '<div class="field"><div class="field-help">Noch niemand eingeladen.</div></div>' : ""}
@@ -224,7 +234,7 @@ function appSection(me) {
         </div>
         <button class="btn small ${outdated ? "primary" : ""}" data-action="hard-reload">${icon("arrows-clockwise", "sm")}App aktualisieren</button>
       </div>
-      <div class="field"><div class="field-help">„App aktualisieren“ leert den Zwischenspeicher dieses Geräts und lädt die App neu. Deine Einstellungen und die Anmeldung bleiben erhalten.</div></div>
+      <div class="field"><div class="field-help">Leert den Zwischenspeicher dieses Geräts und lädt neu. Anmeldung und Einstellungen bleiben.</div></div>
     </div>`;
 }
 
@@ -274,45 +284,37 @@ export async function render(main, params, ctx) {
   const s = settings;
   const theme = readTheme();
 
-  main.innerHTML = `
-    <header class="view-head reveal">
-      <p class="eyebrow">Briefing, Push und Abruf</p>
-      <h1 class="display">Einstellungen</h1>
-    </header>
+  const notifyRows = NOTIFY
+    .filter(([key]) => me.role === "owner" || !["notify_letters", "notify_messages"].includes(key))
+    .map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`)
+    .join("");
 
-    <section class="section reveal" style="--i:1">
-      <h2 class="section-title">Benachrichtigungen</h2>
-      ${pushSection({ subscription, devices })}
-    </section>
-
-    <section class="section reveal" style="--i:2">
-      <h2 class="section-title">Morgen-Briefing</h2>
-      ${briefingSection(s, status, bell)}
-    </section>
-
-    <section class="section reveal" style="--i:3">
-      <h2 class="section-title">Klausur-Erinnerungen</h2>
-      <div class="card">
-        <div class="field"><div class="field-label">Erinnern</div>${toggle("reminder_enabled", s, "Klausur-Erinnerungen")}</div>
-        <div class="field"><div class="field-label">Uhrzeit</div>${time("reminder_time", s, "Uhrzeit Klausur-Erinnerung")}</div>
-        <div class="field stack">
-          <div><div class="field-label">Tage vorher</div><div class="field-help">Mehrfachauswahl</div></div>
-          <div class="chips" role="group" aria-label="Tage vorher">
-            ${REMINDER_DAYS.map((d) => `<button class="chip" type="button" data-day="${d}" aria-pressed="${s.reminder_days.includes(d)}">${d}</button>`).join("")}
-          </div>
+  const reminders = `
+    <div class="card">
+      <div class="field"><div class="field-label">Erinnern</div>${toggle("reminder_enabled", s, "Klausur-Erinnerungen")}</div>
+      <div class="field"><div class="field-label">Uhrzeit</div>${time("reminder_time", s, "Uhrzeit Klausur-Erinnerung")}</div>
+      <div class="field stack">
+        <div class="field-label">Tage vorher</div>
+        <div class="chips" role="group" aria-label="Tage vorher">
+          ${REMINDER_DAYS.map((d) => `<button class="chip" type="button" data-day="${d}" aria-pressed="${s.reminder_days.includes(d)}">${d}</button>`).join("")}
         </div>
       </div>
-    </section>
+    </div>`;
 
-    <section class="section reveal" style="--i:4">
-      <h2 class="section-title">Sofort melden</h2>
-      <div class="card">
-        ${NOTIFY.filter(([key]) => me.role === "owner" || !["notify_letters", "notify_messages"].includes(key)).map(([key, label, help]) => `<div class="field"><div><div class="field-label">${label}</div><div class="field-help">${help}</div></div>${toggle(key, s, label)}</div>`).join("")}
-      </div>
-    </section>
+  main.innerHTML = `
+    <header class="page-head reveal">
+      <h1 class="page-title">Einstellungen</h1>
+    </header>
 
-    <section class="section reveal" style="--i:5">
-      <h2 class="section-title">Abruf</h2>
+    ${group("benachrichtigungen", "Benachrichtigungen", `
+      ${pushSection({ subscription, devices })}
+      <div class="card"><p class="group-label">Sofort melden bei</p>${notifyRows}</div>`)}
+
+    ${group("briefing", "Morgen-Briefing", briefingSection(s, status, bell))}
+
+    ${group("erinnerungen", "Klausur-Erinnerungen", reminders)}
+
+    ${group("abruf", "Abruf", `
       <div class="card">
         <div class="field">
           <div><div class="field-label">Intervall an Schultagen</div><div class="field-help">Wie oft Schulmanager abgefragt wird</div></div>
@@ -328,14 +330,12 @@ export async function render(main, params, ctx) {
         </div>
         <div class="field"><div><div class="field-label">Abrufen ab</div><div class="field-help">Nachts wird nicht abgefragt</div></div>${time("poll_start", s, "Abrufen ab")}</div>
         <div class="field"><div class="field-label">Abrufen bis</div>${time("poll_end", s, "Abrufen bis")}</div>
-      </div>
-    </section>
+      </div>`)}
 
-    <section class="section reveal" style="--i:6">
-      <h2 class="section-title">Kalender-Abo</h2>
+    ${group("kalender", "Kalender-Abo", `
       <div class="card">
         <div class="field stack">
-          <div class="field-help">Stundenplan mit Vertretungen, Entfall, EVA, Klausuren, Beurlaubungen und eigenem Unterricht im Handy-Kalender. Der Link ist geheim, wer ihn kennt, sieht den Plan.</div>
+          <div class="field-help">Stundenplan mit Vertretungen, Entfall, EVA, Klausuren und Beurlaubungen im Handy-Kalender. Der Link ist geheim, wer ihn kennt, sieht den Plan.</div>
           <div class="copy-field">
             <input class="input" readonly value="${esc(ical.url)}" aria-label="Kalender-Link" id="ical-url" />
             <button class="btn small" data-action="copy" data-target="ical-url">${icon("copy", "sm")}Kopieren</button>
@@ -347,7 +347,7 @@ export async function render(main, params, ctx) {
         </div>
         ${ical.events_url ? `<div class="field stack">
           <div class="field-label">Schultermine (optional, eigener Kalender)</div>
-          <div class="field-help">Die Termine aus dem Schulmanager-Kalender (Elternsprechtag, Wandertag …) stehen nicht im Stundenplan-Kalender, damit er übersichtlich bleibt. Wer sie sehen will, abonniert diesen zweiten Kalender. Er hat dasselbe Geheimnis, ein neuer Link oben erneuert auch diesen.</div>
+          <div class="field-help">Elternsprechtag, Wandertag … getrennt vom Stundenplan. Ein neuer Link oben erneuert auch diesen.</div>
           <div class="copy-field">
             <input class="input" readonly value="${esc(ical.events_url)}" aria-label="Link Schultermine" id="ical-events-url" />
             <button class="btn small" data-action="copy" data-target="ical-events-url">${icon("copy", "sm")}Kopieren</button>
@@ -356,21 +356,13 @@ export async function render(main, params, ctx) {
             <a class="btn small" href="${esc(ical.events_webcal)}">${icon("calendar-dots", "sm")}Im Kalender öffnen</a>
           </div>
         </div>` : ""}
-      </div>
-    </section>
+      </div>`)}
 
-    <section class="section reveal" style="--i:6">
-      <h2 class="section-title">Eigener Unterricht</h2>
-      ${coursesSection(own)}
-    </section>
+    ${group("unterricht", "Eigener Unterricht", coursesSection(own))}
 
-    ${friends ? `<section class="section reveal" style="--i:6">
-      <h2 class="section-title">Freunde</h2>
-      ${friendsSection(friends)}
-    </section>` : ""}
+    ${friends ? group("freunde", "Freunde", friendsSection(friends)) : ""}
 
-    <section class="section reveal" style="--i:7">
-      <h2 class="section-title">Darstellung</h2>
+    ${group("darstellung", "Darstellung", `
       <div class="card">
         <div class="field">
           <div class="field-label">Farbschema</div>
@@ -378,22 +370,20 @@ export async function render(main, params, ctx) {
             ${[["system", "System"], ["light", "Hell"], ["dark", "Dunkel"]].map(([v, l]) => `<button type="button" data-theme="${v}" aria-pressed="${theme === v}">${l}</button>`).join("")}
           </div>
         </div>
-      </div>
-    </section>
+      </div>`)}
 
-    <section class="section reveal" style="--i:8">
-      <h2 class="section-title">Status</h2>
-      ${statusSection(status)}
-    </section>
+    ${group("konto", "Konto und App", `${statusSection(status)}${appSection(me)}`)}
 
-    <section class="section reveal" style="--i:9">
-      <h2 class="section-title">App</h2>
-      ${appSection(me)}
-    </section>
-
-    <div class="btn-row reveal" style="margin-top:32px;justify-content:center">
+    <div class="btn-row reveal" style="margin-top:28px;justify-content:center">
       <button class="btn ghost" data-action="logout">${icon("sign-out", "sm")}Abmelden</button>
     </div>`;
+
+  main.querySelectorAll("[data-group]").forEach((el) => {
+    el.addEventListener("toggle", () => {
+      if (el.open) openGroups.add(el.dataset.group);
+      else openGroups.delete(el.dataset.group);
+    });
+  });
 
   // ── Einstellungen speichern ──
   let saveTimer = null;
