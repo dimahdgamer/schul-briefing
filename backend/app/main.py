@@ -7,12 +7,14 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -23,7 +25,7 @@ from . import bell, config, ical, own
 from .friends import FriendError
 from .scheduler import Scheduler
 from .schulmanager import SchulmanagerError
-from .service import AppService
+from .service import AppService, FileTooLarge
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("schule")
@@ -108,7 +110,7 @@ async def cache_headers(request: Request, call_next):
     if path.startswith("/a/"):
         pass  # Versionierte Dateien setzen ihren Cache-Header selbst
     elif path.startswith(("/api/", "/js/", "/css/")) or path in NO_CACHE_PATHS:
-        response.headers["Cache-Control"] = "no-cache"
+        response.headers.setdefault("Cache-Control", "no-cache")  # setdefault: Anhänge sagen selbst "no-store"
     elif path.startswith(("/fonts/", "/icons/")):
         response.headers["Cache-Control"] = "public, max-age=2592000"
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -336,6 +338,48 @@ async def thread(subscription_id: str, before: str | None = None) -> dict[str, A
     except SchulmanagerError as exc:
         log.warning("Nachrichten laden fehlgeschlagen: %s", exc)
         raise HTTPException(status_code=502, detail=f"Nachrichten konnten nicht geladen werden: {exc}") from exc
+
+
+# Nur diese Typen zeigt der Browser direkt an, und nur, wenn der Anfang der Datei zum Typ passt. Alles andere
+# (auch SVG und HTML, die Skripte enthalten können) kommt als Download und nie als Seite dieser App.
+INLINE_TYPES = {
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/gif": (b"GIF87a", b"GIF89a"),
+    "image/webp": (b"RIFF",),
+    "application/pdf": (b"%PDF",),
+}
+
+
+def _shows_inline(mime: str, data: bytes) -> bool:
+    starts = INLINE_TYPES.get(mime)
+    if not starts or not data.startswith(starts):
+        return False
+    return mime != "image/webp" or data[8:12] == b"WEBP"
+
+
+@app.get("/api/thread/{subscription_id}/file/{message_id}/{attachment_id}", dependencies=[Depends(require_owner)])
+async def thread_file(subscription_id: str, message_id: str, attachment_id: str, download: bool = False) -> Response:
+    """Anhang einer Nachricht: Bilder und PDFs zum Ansehen, alles andere (oder `?download=1`) zum Speichern."""
+    if not message_id.isdigit() or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", attachment_id):
+        raise HTTPException(status_code=400, detail="Ungültige Angabe")
+    try:
+        data, info = await service.attachment(subscription_id, message_id, attachment_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Anhang nicht gefunden") from exc
+    except FileTooLarge as exc:
+        raise HTTPException(status_code=413, detail="Der Anhang ist zu groß für die App. Bitte in Schulmanager öffnen.") from exc
+    except SchulmanagerError as exc:
+        log.warning("Anhang laden fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Anhang konnte nicht geladen werden: {exc}") from exc
+    inline = not download and _shows_inline(info["type"], data)
+    headers = {
+        "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(info['name'], safe='')}",
+        "Cache-Control": "private, no-store",  # Anhänge bleiben nicht im Browser-Cache liegen
+    }
+    if inline and info["type"].startswith("image/"):
+        headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    return Response(data, media_type=info["type"] if inline else "application/octet-stream", headers=headers)
 
 
 @app.post("/api/thread/{subscription_id}/read", dependencies=[Depends(require_owner)])

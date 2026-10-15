@@ -7,7 +7,10 @@ Wahrscheinlichkeit etwas (Entfall, neue Note, neuer Brief …), damit sich
 
 from __future__ import annotations
 
+import json
 import random
+import struct
+import zlib
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
@@ -60,6 +63,28 @@ LETTERS = [
 ]
 
 STATE_KEY = "demo_state"
+
+
+def _demo_png(width: int = 240, height: int = 140) -> bytes:
+    """Ein kleines Farbverlauf-Bild, gebaut ohne Bibliothek, als Demo-Anhang."""
+    rows = b"".join(
+        b"\x00" + b"".join(bytes((40 + x * 160 // width, 120, 200 - y * 120 // height)) for x in range(width))
+        for y in range(height)
+    )
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+DEMO_PNG = _demo_png()
+DEMO_PDF = (
+    b"%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 240 140]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF"
+)
 
 
 class DemoSource:
@@ -127,24 +152,36 @@ class DemoSource:
         last_at = thread["lastMessageTimestamp"]
         sender = thread["senderString"].split(",")[0]
 
-        def message(number: int, text: str, mine: bool, at: str) -> dict[str, Any]:
+        def attachment(number: int, mime: str, name: str, size: int) -> dict[str, Any]:
+            # Wie bei Schulmanager: `file` ist ein JSON-Text [Institution, Bereich, Datei-ID, Schlüssel, Typ, Größe, Name]
+            return {"id": str(base + number), "file": json.dumps([1, "messenger", str(base + number), "demo-schluessel", mime, size, name])}
+
+        def message(number: int, text: str, mine: bool, at: str, files: list[dict[str, Any]] | None = None) -> dict[str, Any]:
             return {
                 "id": str(base + number), "text": text, "createdAt": at, "threadId": str(thread["id"]),
                 "senderId": 1 if mine else 2,
                 "sender": {"id": 1, "firstname": "Demo", "lastname": "Schüler"} if mine
                 else {"id": 2, "firstname": "", "lastname": sender},
-                "attachments": [],
+                "attachments": files or [],
             }
 
         day = datetime.fromisoformat(last_at)
         everything = [
             message(1, "Hallo,\nkurze Frage zum nächsten Treffen: Wann geht es los?", False, (day - timedelta(days=2)).isoformat()),
             message(2, "Alles klar, ich bin dabei. Danke!", True, (day - timedelta(days=1)).isoformat()),
-            message(3, thread["lastMessage"]["text"], False, last_at),
+            message(3, thread["lastMessage"]["text"], False, last_at, [
+                attachment(11, "image/png", "Treffpunkt.png", len(DEMO_PNG)),
+                attachment(12, "application/pdf", "Ablaufplan.pdf", len(DEMO_PDF)),
+                attachment(13, "application/zip", "Material.zip", 2048),
+            ]),
         ]
         if before:
             return {"messages": [m for m in everything if int(m["id"]) < int(before)], "hasMoreMessages": False}
         return {"messages": everything[1:], "hasMoreMessages": True}
+
+    def file_bytes(self, mime: str) -> bytes:
+        """Inhalt eines Demo-Anhangs: ein Bild, ein PDF, sonst irgendwelche Bytes."""
+        return {"image/png": DEMO_PNG, "application/pdf": DEMO_PDF}.get(mime, b"PK\x03\x04 Demo")
 
     def mark_read(self, subscription_id: str) -> None:
         """Eine Demo-Unterhaltung als gelesen markieren (wie `set-subscription-read`)."""

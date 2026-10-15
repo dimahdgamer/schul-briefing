@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import logging
+from collections import OrderedDict
 from datetime import date, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
+
+import httpx
 
 from . import bell, briefing, fmt, normalize, own
 from .config import Config
@@ -12,10 +17,17 @@ from .db import Database
 from .friends import Friends
 from .holidays import SchoolCalendar
 from .push import Pusher
-from .schulmanager import RpcCall, SchulmanagerError
+from .schulmanager import USER_AGENT, RpcCall, SchulmanagerError
 from .sync import MODULES, SyncService
 
 log = logging.getLogger(__name__)
+
+FILE_LIMIT = 25 * 1024 * 1024  # größer als das wird nicht geladen (die Datei liegt kurz im Speicher)
+FILE_MEMORY = 400  # so viele Anhänge merkt sich die App (siehe `_remember_files`)
+
+
+class FileTooLarge(Exception):
+    pass
 
 
 class AppService:
@@ -38,6 +50,8 @@ class AppService:
         self.sync = SyncService(cfg, self.db, self.calendar, sync_pusher or self.pusher,
                                 modules=modules, keep_raw=standalone)
         self.friends: Friends | None = Friends(cfg, self.db, self.pusher) if standalone else None
+        self._files: OrderedDict[tuple[str, str, str], str] = OrderedDict()  # Anhänge der zuletzt geöffneten Nachrichten
+        self._storage_url: str | None = None
         cal_events = self.db.snapshot("calendar")
         if cal_events:
             self.calendar.set_calendar_holidays(cal_events)
@@ -123,22 +137,94 @@ class AppService:
         Nur lesend: `get-messages-by-subscription` ändert den Gelesen-Status nicht (live geprüft). Gelesen wird
         erst mit `mark_thread_read` markiert, das die Ansicht nach dem Anzeigen aufruft. Es gibt nur
         Unterhaltungen aus dem letzten Abruf (`LookupError` sonst), keine frei gewählte Nummer."""
+        thread = self._known_thread(subscription_id)
+        raw, own_id = await self._fetch_messages(subscription_id, int(before) if before else None)
+        self._remember_files(subscription_id, raw)
+        meta = {key: thread.get(key) for key in ("subscription_id", "subject", "sender", "recipients", "url", "unread")}
+        return {"thread": meta, **normalize.messages(raw, own_id)}
+
+    def _known_thread(self, subscription_id: str) -> dict[str, Any]:
         thread = next((t for t in self.snap("threads") if t.get("subscription_id") == subscription_id), None)
         if thread is None:
             raise LookupError(subscription_id)
+        return thread
+
+    async def _fetch_messages(self, subscription_id: str, before: int | None) -> tuple[Any, Any]:
+        """Rohantwort von `get-messages-by-subscription` und die eigene Nutzer-ID."""
         if self.sync.demo is not None:
-            raw, own_id = self.sync.demo.messages(subscription_id, before), self.sync.demo.user["id"]
-        else:
+            return self.sync.demo.messages(subscription_id, str(before) if before else None), self.sync.demo.user["id"]
+        client = self.sync.client
+        if client is None:
+            raise SchulmanagerError("Kein Schulmanager-Konto verbunden.", 0)
+        parameters = {"subscriptionId": subscription_id, "before": before, "loadAll": False}
+        (result,) = await client.calls([RpcCall("messenger", "get-messages-by-subscription", parameters)])
+        if not result.ok:
+            raise SchulmanagerError(f"Schulmanager lieferte die Nachrichten nicht (HTTP {result.status}).", result.status)
+        return result.data, client.user.get("id")
+
+    # ── Anhänge ──────────────────────────────────────────────────────
+
+    def _remember_files(self, subscription_id: str, raw: Any) -> None:
+        """Merkt sich im Speicher, woraus sich die Anhänge der gerade gelieferten Nachrichten laden lassen.
+        So kostet jedes Bild in der Ansicht nur den Download und keinen weiteren Abruf bei Schulmanager."""
+        for (message_id, attachment_id), text in normalize.attachment_files(raw).items():
+            self._files[(subscription_id, message_id, attachment_id)] = text
+            self._files.move_to_end((subscription_id, message_id, attachment_id))
+        while len(self._files) > FILE_MEMORY:
+            self._files.popitem(last=False)
+
+    async def attachment(self, subscription_id: str, message_id: str, attachment_id: str) -> tuple[bytes, dict[str, Any]]:
+        """Inhalt eines Anhangs und seine Angaben (Name, Typ, Größe). Nur für Anhänge von Nachrichten in
+        Unterhaltungen aus dem letzten Abruf. `LookupError`: gibt es nicht, `FileTooLarge`: über dem Limit."""
+        self._known_thread(subscription_id)
+        key = (subscription_id, message_id, attachment_id)
+        if key not in self._files:  # nach einem Neustart: die Nachricht kurz neu laden (`before` ist exklusiv)
+            raw, _ = await self._fetch_messages(subscription_id, int(message_id) + 1)
+            self._remember_files(subscription_id, raw)
+        text = self._files.get(key)
+        if text is None:
+            raise LookupError(attachment_id)
+        info = normalize.attachment_info({"id": attachment_id, "file": text})
+        if info["size"] > FILE_LIMIT:
+            raise FileTooLarge(info["size"])
+        return await self._download(text), info
+
+    async def _storage(self) -> str:
+        """Adresse, unter der Schulmanager die Dateien ausliefert (`get-remote-storage-url`). Nur https und nur
+        Schulmanager, damit eine unerwartete Antwort die App nicht zu fremden Servern schickt."""
+        if self._storage_url is None:
             client = self.sync.client
             if client is None:
                 raise SchulmanagerError("Kein Schulmanager-Konto verbunden.", 0)
-            parameters = {"subscriptionId": subscription_id, "before": int(before) if before else None, "loadAll": False}
-            (result,) = await client.calls([RpcCall("messenger", "get-messages-by-subscription", parameters)])
-            if not result.ok:
-                raise SchulmanagerError(f"Schulmanager lieferte die Nachrichten nicht (HTTP {result.status}).", result.status)
-            raw, own_id = result.data, client.user.get("id")
-        meta = {key: thread.get(key) for key in ("subscription_id", "subject", "sender", "recipients", "url", "unread")}
-        return {"thread": meta, **normalize.messages(raw, own_id)}
+            (result,) = await client.calls([RpcCall("messenger", "get-remote-storage-url", {})])
+            parts = urlsplit(result.data) if result.ok and isinstance(result.data, str) else None
+            host = (parts.hostname or "") if parts else ""
+            if not parts or parts.scheme != "https" or not (host == "schulmanager-online.de" or host.endswith(".schulmanager-online.de")):
+                raise SchulmanagerError("Schulmanager nannte keine gültige Adresse für Dateien.", 0)
+            self._storage_url = result.data.rstrip("/")
+        return self._storage_url
+
+    async def _download(self, text: str) -> bytes:
+        """Datei laden: Die Adresse enthält die Beschreibung der Datei samt Schlüssel (wie bei der Website),
+        eine Anmeldung ist dafür nicht nötig und wird deshalb auch nicht mitgeschickt."""
+        if self.sync.demo is not None:
+            return self.sync.demo.file_bytes(normalize.attachment_info({"file": text})["type"])
+        url = f"{await self._storage()}/download-file/{base64.b64encode(text.encode('utf-8')).decode('ascii')}"
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0), headers={"User-Agent": USER_AGENT}) as http:
+                async with http.stream("GET", url) as response:
+                    if response.status_code != 200:
+                        raise SchulmanagerError(f"Die Datei ist bei Schulmanager nicht abrufbar (HTTP {response.status_code}).", response.status_code)
+                    async for chunk in response.aiter_bytes():
+                        total += len(chunk)
+                        if total > FILE_LIMIT:
+                            raise FileTooLarge(total)
+                        chunks.append(chunk)
+        except httpx.HTTPError as exc:
+            raise SchulmanagerError(f"Netzwerkfehler beim Laden der Datei: {exc}", 0, "network") from exc
+        return b"".join(chunks)
 
     async def mark_thread_read(self, subscription_id: str, message_id: str) -> dict[str, Any]:
         """Eine Unterhaltung in Schulmanager als gelesen markieren, so wie es die Website beim Öffnen tut:

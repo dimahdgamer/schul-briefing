@@ -196,6 +196,124 @@ def test_mark_thread_read_sends_the_call_of_the_website(client, monkeypatch):
     assert len(sent) == count
 
 
+def test_attachments_in_demo(client):
+    http, main = client
+    assert http.get("/api/thread/501/file/1/2").status_code == 401  # ohne Anmeldung
+    sub = _first_thread(http)
+    newest = http.get(f"/api/thread/{sub}").json()["items"][-1]
+    image, pdf, other = newest["attachments"]
+    assert (image["type"], image["name"]) == ("image/png", "Treffpunkt.png") and image["size"] > 0
+    assert all(set(a) == {"id", "name", "type", "size"} for a in newest["attachments"])  # kein Schlüssel nach außen
+
+    base = f"/api/thread/{sub}/file/{newest['id']}/"
+    shown = http.get(base + image["id"])
+    assert shown.status_code == 200 and shown.headers["content-type"] == "image/png" and shown.content.startswith(b"\x89PNG")
+    assert shown.headers["content-disposition"].startswith("inline; filename*=UTF-8''Treffpunkt.png")
+    assert "sandbox" in shown.headers["content-security-policy"]
+    assert shown.headers["cache-control"] == "private, no-store"  # nicht im Browser-Cache
+
+    viewed = http.get(base + pdf["id"])
+    assert viewed.headers["content-type"] == "application/pdf" and viewed.headers["content-disposition"].startswith("inline")
+
+    saved = http.get(base + other["id"])  # ZIP: nie direkt anzeigen
+    assert saved.headers["content-type"] == "application/octet-stream" and saved.headers["content-disposition"].startswith("attachment")
+    forced = http.get(base + image["id"] + "?download=1")
+    assert forced.headers["content-disposition"].startswith("attachment") and forced.headers["content-type"] == "application/octet-stream"
+
+    main.owner._files.clear()  # wie nach einem Neustart: die Nachricht wird dafür kurz neu geladen
+    assert http.get(base + image["id"]).status_code == 200
+
+    assert http.get(base + "99999").status_code == 404
+    assert http.get(f"/api/thread/999999/file/{newest['id']}/{image['id']}").status_code == 404
+    assert http.get(f"/api/thread/{sub}/file/abc/{image['id']}").status_code == 400
+    assert http.get(base + "a$b").status_code == 400
+
+
+def test_attachment_download_only_serves_safe_types_inline(client, monkeypatch):
+    import base64
+    import json
+
+    import httpx
+
+    import app.service as service_module
+    from app.schulmanager import RpcResult
+
+    http, main = client
+    sub = _first_thread(http)
+    jpeg = b"\xff\xd8\xff\xe0" + b"0" * 20
+    page = b"<html><script>alert(1)</script></html>"
+    downloads = {}  # Adresse -> Antwort des Datei-Servers
+
+    def attachment(number, mime, size, name, content):
+        text = json.dumps([1, "messenger", str(number), f"SCHLUESSEL-{number}", mime, size, name])
+        downloads["https://login.schulmanager-online.de/storage/download-file/" + base64.b64encode(text.encode()).decode()] = content
+        return {"id": str(number), "file": text}
+
+    files = [
+        attachment(1, "image/jpeg", len(jpeg), "Ärger Foto.jpeg", jpeg),
+        attachment(2, "image/jpeg", len(page), "falsch.jpeg", page),  # behauptet Bild, ist eine Seite
+        attachment(3, "image/svg+xml", len(page), "bild.svg", page),  # SVG kann Skripte enthalten
+        attachment(4, "application/pdf", 30 * 1024 * 1024, "riesig.pdf", b"%PDF"),  # über dem Limit, wird nicht geladen
+        attachment(5, "application/pdf", 10, "luegt.pdf", b"%PDF" + b"x" * service_module.FILE_LIMIT),  # größer als angegeben
+        attachment(6, "application/pdf", 10, "weg.pdf", None),  # Datei-Server antwortet mit 404
+    ]
+    reply = {"hasMoreMessages": False, "messages": [
+        {"id": "20", "text": "Anhänge", "createdAt": "2026-10-15T09:00:00.000Z", "senderId": 5,
+         "sender": {"firstname": "", "lastname": "Krüger"}, "attachments": files}]}
+    sent, seen = [], []
+    storage = {"url": "https://login.schulmanager-online.de/storage"}
+
+    class FakeClient:
+        user = {"id": 77}
+
+        async def calls(self, requests):
+            sent.extend(requests)
+            return [RpcResult(200, reply if r.endpoint == "get-messages-by-subscription" else storage["url"]) for r in requests]
+
+    def handler(request):
+        seen.append(request)
+        content = downloads.get(str(request.url))
+        return httpx.Response(200 if content is not None else 404, content=content or b"")
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(main.owner.sync, "demo", None)
+    monkeypatch.setattr(main.owner.sync, "client", FakeClient())
+
+    base = f"/api/thread/{sub}/file/20/"
+    http.get(f"/api/thread/{sub}")  # Ansicht geöffnet: die Anhänge sind bekannt
+
+    ok = http.get(base + "1")
+    assert ok.status_code == 200 and ok.content == jpeg and ok.headers["content-type"] == "image/jpeg"
+    assert ok.headers["content-disposition"] == "inline; filename*=UTF-8''%C3%84rger%20Foto.jpeg"
+    assert "authorization" not in seen[-1].headers  # die Anmeldung geht nie an den Datei-Server
+    assert [c.endpoint for c in sent].count("get-messages-by-subscription") == 1  # Anhang kam aus dem Speicher
+
+    for number in ("2", "3"):  # Typ passt nicht zum Inhalt, bzw. nicht anzeigbar: nur als Download
+        risky = http.get(base + number)
+        assert risky.headers["content-disposition"].startswith("attachment") and risky.headers["content-type"] == "application/octet-stream"
+        assert "content-security-policy" not in risky.headers
+
+    assert http.get(base + "4").status_code == 413 and len(seen) == 3  # laut Angabe zu groß: nicht mal geladen
+    assert http.get(base + "5").status_code == 413  # größer als angegeben: Abbruch beim Laden
+    assert http.get(base + "6").status_code == 502  # Datei-Server sagt 404
+
+    # Nach einem Neustart: Nachricht wird neu geladen (`before` ist exklusiv, also ID + 1) und die Adresse erneut geholt
+    main.owner._files.clear()
+    sent.clear()
+    assert http.get(base + "1").status_code == 200
+    (reload,) = [c for c in sent if c.endpoint == "get-messages-by-subscription"]
+    assert reload.parameters["before"] == 21
+
+    # Eine unerwartete Adresse für Dateien wird nicht benutzt
+    main.owner._storage_url = None
+    storage["url"] = "https://evil.example/storage"
+    failed = http.get(base + "1")
+    assert failed.status_code == 502 and "Adresse" in failed.json()["detail"]
+    storage["url"] = "http://login.schulmanager-online.de/storage"  # auch kein Klartext-http
+    assert http.get(base + "1").status_code == 502
+
+
 def test_login_rate_limit(client):
     http, _ = client
     for _ in range(5):

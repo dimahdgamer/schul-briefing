@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
@@ -235,7 +236,7 @@ RAW_MESSAGES = {
          "threadId": "9001", "sender": {"firstname": "Demo", "lastname": "Schüler", "id": 77}, "attachments": []},
         {"id": "999990", "text": "Bitte <b>nicht</b> vergessen: https://example.org/a?x=1&y=2", "createdAt": "2026-10-13T08:00:00.000Z",
          "senderId": 5, "threadId": "9001", "sender": {"firstname": "Lena", "lastname": "Krüger", "id": 5},
-         "attachments": [{"id": "1", "file": "ordner/plan.pdf"}]},
+         "attachments": [{"id": "1", "file": json.dumps([1, "messenger", "55", "GEHEIMER-SCHLUESSEL", "application/pdf", 1234, "plan.pdf"])}]},
     ],
 }
 
@@ -249,7 +250,9 @@ def test_messages_oldest_first_with_own_marker():
     assert older["sender"] == "Lena Krüger" and newer["sender"] == "Demo Schüler"
     assert newer["text"] == "Danke!\n\nBis morgen"  # Zeilenumbrüche bleiben
     assert older["text"].startswith("Bitte <b>nicht</b>")  # der Text wird nicht verändert, das Frontend maskiert ihn
-    assert older["attachments"] == ["ordner/plan.pdf"] and newer["attachments"] == []
+    assert older["attachments"] == [{"id": "1", "name": "plan.pdf", "type": "application/pdf", "size": 1234}]
+    assert newer["attachments"] == []
+    assert "GEHEIMER-SCHLUESSEL" not in json.dumps(out)  # der Schlüssel zum Download verlässt den Server nie
 
 
 def test_messages_without_own_id_and_with_junk():
@@ -684,3 +687,21 @@ def test_next_course_date_skips_holidays_and_respects_validity(calendar):
 def test_course_label():
     assert own.course_label(russian()) == "Do · 15:00–17:15 · 9–11. Std"
     assert own.course_label(russian(weekdays=[0, 2], start="19:00", end="20:00")) == "Mo, Mi · 19:00–20:00"
+
+
+def test_attachment_info_reads_the_file_description():
+    text = json.dumps([7, "messenger", "55", "KEY", "image/png", "2048", "Foto vom Treffen.png"])
+    assert normalize.attachment_info({"id": 9, "file": text}) == {"id": "9", "name": "Foto vom Treffen.png", "type": "image/png", "size": 2048}
+    # Kein JSON (oder andere Form): wenigstens ein Name, nie ein Absturz
+    assert normalize.attachment_info({"id": "1", "file": "ordner/plan.pdf"})["name"] == "plan.pdf"
+    assert normalize.attachment_info({"id": "1", "file": "[1,2]"})["name"] == "[1,2]"
+    assert normalize.attachment_info({"id": "1"}) == {"id": "1", "name": "Anhang", "type": "", "size": 0}
+    broken = json.dumps([7, "messenger", "55", "KEY", "image/png", "viel", "x.png"])
+    assert normalize.attachment_info({"file": broken})["size"] == 0
+
+
+def test_attachment_files_map_message_and_attachment_to_the_download_text():
+    files = normalize.attachment_files(RAW_MESSAGES)
+    assert list(files) == [("999990", "1")]
+    assert "GEHEIMER-SCHLUESSEL" in files[("999990", "1")]  # nur für den Download auf dem Server
+    assert normalize.attachment_files(None) == {} and normalize.attachment_files({"messages": ["x", {"id": 1}]}) == {}

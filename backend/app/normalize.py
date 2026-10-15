@@ -7,6 +7,7 @@ Alles hier ist bewusst defensiv: Felder können fehlen, Typen schwanken
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import date
 from typing import Any, Callable
@@ -510,6 +511,34 @@ def threads(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def attachment_info(item: dict[str, Any]) -> dict[str, Any]:
+    """Name, Typ und Größe eines Anhangs. `file` ist bei Schulmanager kein Name, sondern ein JSON-Text
+    `[Institution, Bereich, Datei-ID, Schlüssel, Typ, Größe, Name]`. Der Schlüssel gehört zum Download und
+    bleibt auf dem Server: Er steht nie in der Ausgabe."""
+    raw = _s(item.get("file"))
+    name, mime, size = "", "", 0
+    try:
+        parts = json.loads(raw)
+    except ValueError:
+        parts = None
+    if isinstance(parts, list) and len(parts) >= 7:
+        mime, name = _s(parts[4]), _s(parts[6])
+        size = int(parts[5]) if _s(parts[5]).isdigit() else 0
+    return {"id": _s(item.get("id")), "name": name or raw.rsplit("/", 1)[-1] or "Anhang", "type": mime, "size": size}
+
+
+def attachment_files(raw: Any) -> dict[tuple[str, str], str]:
+    """(Nachrichten-ID, Anhang-ID) -> der `file`-Text, aus dem sich der Anhang herunterladen lässt."""
+    out: dict[tuple[str, str], str] = {}
+    for item in (raw.get("messages") if isinstance(raw, dict) else None) or []:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        for attachment in item.get("attachments") or []:
+            if isinstance(attachment, dict) and attachment.get("id") is not None and attachment.get("file"):
+                out[(_s(item["id"]), _s(attachment["id"]))] = _s(attachment["file"])
+    return out
+
+
 def _message_order(message: dict[str, Any]) -> tuple[int, str]:
     text = message["id"]
     return (int(text), text) if text.isdigit() else (0, text)
@@ -528,9 +557,7 @@ def messages(raw: Any, own_id: Any = None) -> dict[str, Any]:
             continue
         sender = item.get("sender") if isinstance(item.get("sender"), dict) else {}
         name = " ".join(part for part in (_s(sender.get("firstname")), _s(sender.get("lastname"))) if part)
-        attachments = [
-            _s(a.get("file")) or "Anhang" for a in item.get("attachments") or [] if isinstance(a, dict)
-        ]
+        attachments = [attachment_info(a) for a in item.get("attachments") or [] if isinstance(a, dict)]
         items.append(
             {
                 "id": _s(item["id"]),

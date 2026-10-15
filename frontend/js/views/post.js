@@ -55,9 +55,41 @@ function when(timestamp) {
   return `${day} · ${date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-function messageBlock(message) {
+// Diese Typen zeigt der Server direkt an (Bilder als Vorschau, PDF im Browser), alles andere lädt man herunter.
+const PREVIEW_IMAGES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+function fileSize(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toLocaleString("de-DE", { maximumFractionDigits: 1 })} MB`;
+}
+
+function fileUrl(subscriptionId, message, file) {
+  return `/api/thread/${encodeURIComponent(subscriptionId)}/file/${encodeURIComponent(message.id)}/${encodeURIComponent(file.id)}`;
+}
+
+function fileChip(subscriptionId, message, file) {
+  const viewable = file.type === "application/pdf";
+  const href = fileUrl(subscriptionId, message, file) + (viewable ? "" : "?download=1");
+  return `
+    <a class="msg-file" href="${esc(href)}" target="_blank" rel="noopener" title="${viewable ? "Ansehen" : "Herunterladen"}">
+      ${icon(viewable ? "eye" : "download-simple", "sm")}<span class="name">${esc(file.name)}</span><span class="size">${esc(fileSize(file.size))}</span>
+    </a>`;
+}
+
+function fileBlock(subscriptionId, message, file) {
+  if (!PREVIEW_IMAGES.includes(file.type)) return fileChip(subscriptionId, message, file);
+  const url = esc(fileUrl(subscriptionId, message, file));
+  return `
+    <a class="msg-image" href="${url}" target="_blank" rel="noopener" data-chip="${esc(`${message.id}/${file.id}`)}">
+      <img src="${url}" alt="${esc(file.name)}" loading="lazy" />
+    </a>`;
+}
+
+function messageBlock(message, subscriptionId) {
   const files = message.attachments.length
-    ? `<div class="msg-files">${message.attachments.map((name) => `<span class="tag">${icon("link", "sm")}${esc(name.split("/").pop())}</span>`).join("")}</div>`
+    ? `<div class="msg-files">${message.attachments.map((file) => fileBlock(subscriptionId, message, file)).join("")}</div>`
     : "";
   return `
     <article class="msg${message.mine ? " mine" : ""}">
@@ -107,8 +139,19 @@ async function renderThread(main, subscriptionId, ctx) {
   const moreButton = moreBox.querySelector("button");
 
   function draw() {
-    list.innerHTML = items.length ? items.map(messageBlock).join("") : '<div class="empty">Keine Nachrichten in dieser Unterhaltung.</div>';
+    list.innerHTML = items.length
+      ? items.map((message) => messageBlock(message, thread.subscription_id)).join("")
+      : '<div class="empty">Keine Nachrichten in dieser Unterhaltung.</div>';
     moreBox.hidden = !more;
+    // Lässt sich ein Bild nicht laden (zu groß, nicht mehr vorhanden), bleibt der Name als Link zum Herunterladen
+    list.querySelectorAll(".msg-image img").forEach((img) => {
+      img.addEventListener("error", () => {
+        const [messageId, fileId] = img.closest(".msg-image").dataset.chip.split("/");
+        const message = items.find((m) => m.id === messageId);
+        const file = message?.attachments.find((f) => f.id === fileId);
+        if (file) img.closest(".msg-image").outerHTML = fileChip(thread.subscription_id, message, { ...file, type: "" });
+      }, { once: true });
+    });
   }
 
   moreButton.addEventListener("click", async () => {
