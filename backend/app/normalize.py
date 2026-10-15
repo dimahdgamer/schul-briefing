@@ -496,8 +496,10 @@ def threads(raw: Any) -> list[dict[str, Any]]:
         out.append(
             {
                 "id": thread_id,
+                "subscription_id": _s(sub.get("id")),  # damit lädt Schulmanager die Nachrichten einer Unterhaltung
                 "subject": _s(thread.get("subject")) or "Nachricht",
                 "sender": _s(thread.get("senderString")),
+                "recipients": _s(thread.get("recipientString")),
                 "last_at": _s(thread.get("lastMessageTimestamp")),
                 "unread": int(sub.get("unreadCount") or 0),
                 "preview": _strip_html(_s(last.get("text")))[:160],
@@ -506,6 +508,41 @@ def threads(raw: Any) -> list[dict[str, Any]]:
         )
     out.sort(key=lambda t: t["last_at"], reverse=True)
     return out
+
+
+def _message_order(message: dict[str, Any]) -> tuple[int, str]:
+    text = message["id"]
+    return (int(text), text) if text.isdigit() else (0, text)
+
+
+def messages(raw: Any, own_id: Any = None) -> dict[str, Any]:
+    """Nachrichten einer Unterhaltung (Antwort von `get-messages-by-subscription`), die älteste zuerst.
+
+    Der Text ist bei Schulmanager reiner Text mit Zeilenumbrüchen, kein HTML. Er wird hier nicht verändert
+    und im Frontend nur als Text angezeigt. `mine` sagt, ob die Nachricht von dir ist (`senderId` = Nutzer-ID)."""
+    if not isinstance(raw, dict):
+        return {"items": [], "more": False}
+    items = []
+    for item in raw.get("messages") or []:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        sender = item.get("sender") if isinstance(item.get("sender"), dict) else {}
+        name = " ".join(part for part in (_s(sender.get("firstname")), _s(sender.get("lastname"))) if part)
+        attachments = [
+            _s(a.get("file")) or "Anhang" for a in item.get("attachments") or [] if isinstance(a, dict)
+        ]
+        items.append(
+            {
+                "id": _s(item["id"]),
+                "text": _s(item.get("text")),
+                "at": _s(item.get("createdAt")),
+                "sender": name,
+                "mine": own_id is not None and _s(item.get("senderId")) == _s(own_id),
+                "attachments": attachments,
+            }
+        )
+    items.sort(key=_message_order)
+    return {"items": items, "more": bool(raw.get("hasMoreMessages"))}
 
 
 def _strip_html(text: str) -> str:

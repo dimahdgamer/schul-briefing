@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { errorState, esc, icon, shortDate, skeleton, timeAgo } from "../ui.js";
+import { errorState, esc, icon, shortDate, skeleton, timeAgo, toast } from "../ui.js";
 
 export const title = "Post";
 
@@ -18,8 +18,13 @@ function letterRow(letter) {
 }
 
 function threadRow(thread) {
+  // Nachrichten öffnen in der App. Ohne Nummer (Stand von vor dem Update, bis zum nächsten Abruf) geht es nach Schulmanager.
+  const inApp = Boolean(thread.subscription_id);
+  const link = inApp
+    ? `href="#/post?thread=${encodeURIComponent(thread.subscription_id)}"`
+    : `href="${esc(thread.url)}" target="_blank" rel="noopener"`;
   return `
-    <li><a class="row" href="${esc(thread.url)}" target="_blank" rel="noopener">
+    <li><a class="row" ${link}>
       <span class="row-icon ${thread.unread ? "blue" : ""}">${icon("chat-circle-text")}</span>
       <div class="row-main">
         <div class="row-title">${thread.unread ? '<span class="unread-dot" aria-label="ungelesen"></span>' : ""}${esc(thread.subject)}</div>
@@ -29,7 +34,108 @@ function threadRow(thread) {
     </a></li>`;
 }
 
+// ── Eine Unterhaltung ────────────────────────────────────────────────
+
+// Links im Text anklickbar machen. Der Text ist vorher maskiert, die Treffer enthalten also weder Anführungszeichen noch
+// Tags; gefunden wird nur http(s).
+const URL_PATTERN = /https?:\/\/(?:(?!&quot;|&#39;|&lt;|&gt;)\S)+/g;
+
+function linkify(text) {
+  return esc(text).replace(URL_PATTERN, (match) => {
+    const url = match.replace(/[.,;:!?)\]]+$/, "");
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${match.slice(url.length)}`;
+  });
+}
+
+function when(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  const day = date.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", ...(sameYear ? {} : { year: "2-digit" }) });
+  return `${day} · ${date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function messageBlock(message) {
+  const files = message.attachments.length
+    ? `<div class="msg-files">${message.attachments.map((name) => `<span class="tag">${icon("link", "sm")}${esc(name.split("/").pop())}</span>`).join("")}</div>`
+    : "";
+  return `
+    <article class="msg${message.mine ? " mine" : ""}">
+      <div class="msg-head">
+        <span class="msg-name">${message.mine ? "Ich" : esc(message.sender || "Unbekannt")}</span>
+        <time class="msg-time" datetime="${esc(message.at)}">${esc(when(message.at))}</time>
+      </div>
+      <div class="msg-text">${linkify(message.text)}</div>
+      ${files}
+    </article>`;
+}
+
+const BACK = `<div class="thread-nav"><a class="btn ghost small" href="#/post">${icon("arrow-left", "sm")}Post</a></div>`;
+
+async function renderThread(main, subscriptionId, ctx) {
+  main.innerHTML = skeleton(4);
+  const path = `/thread/${encodeURIComponent(subscriptionId)}`;
+  let data;
+  try {
+    data = await api(path);
+  } catch (error) {
+    if (!ctx.isCurrent()) return;
+    main.innerHTML = BACK + errorState(error);
+    main.querySelector("[data-action=retry]")?.addEventListener("click", () => ctx.rerender());
+    return;
+  }
+  if (!ctx.isCurrent()) return;
+
+  const thread = data.thread;
+  let items = data.items;
+  let more = data.more;
+  const meta = [thread.sender && `Von ${thread.sender}`, thread.recipients && `an ${thread.recipients}`].filter(Boolean).join(" ");
+
+  main.innerHTML = `
+    <div class="reveal">${BACK}</div>
+    <header class="page-head reveal"><h1 class="page-title thread-title">${esc(thread.subject)}</h1></header>
+    ${meta ? `<p class="thread-meta reveal">${esc(meta)}</p>` : ""}
+    <div class="thread-more" hidden><button class="btn small" type="button">Ältere Nachrichten laden</button></div>
+    <div class="msgs"></div>
+    <div class="btn-row thread-actions">
+      <a class="btn small" href="${esc(thread.url)}" target="_blank" rel="noopener">${icon("arrow-right", "sm")}In Schulmanager öffnen</a>
+    </div>
+    <p class="foot-status">Hier zu lesen ändert nichts am Gelesen-Status in Schulmanager. Antworten geht noch nur dort.</p>`;
+
+  const list = main.querySelector(".msgs");
+  const moreBox = main.querySelector(".thread-more");
+  const moreButton = moreBox.querySelector("button");
+
+  function draw() {
+    list.innerHTML = items.length ? items.map(messageBlock).join("") : '<div class="empty">Keine Nachrichten in dieser Unterhaltung.</div>';
+    moreBox.hidden = !more;
+  }
+
+  moreButton.addEventListener("click", async () => {
+    moreButton.disabled = true;
+    try {
+      const older = await api(`${path}?before=${encodeURIComponent(items[0].id)}`);
+      if (!ctx.isCurrent()) return;
+      const height = document.documentElement.scrollHeight;
+      items = [...older.items, ...items];
+      more = older.more;
+      draw();
+      window.scrollBy(0, document.documentElement.scrollHeight - height); // der Text, den man gerade liest, bleibt stehen
+    } catch (error) {
+      toast(error.message || "Konnte nicht geladen werden.", "error");
+    }
+    moreButton.disabled = false;
+  });
+
+  draw();
+  requestAnimationFrame(() => list.lastElementChild?.scrollIntoView({ block: "end" })); // die neueste Nachricht zuerst
+}
+
+// ── Liste ────────────────────────────────────────────────────────────
+
 export async function render(main, params, ctx) {
+  if (params.thread) return renderThread(main, params.thread, ctx);
+
   main.innerHTML = skeleton(5);
   let data;
   try {
@@ -58,5 +164,5 @@ export async function render(main, params, ctx) {
       <h2 class="section-title">Nachrichten <span class="aside">${data.threads.length}</span></h2>
       ${data.threads.length ? `<ul class="list">${data.threads.slice(0, 30).map(threadRow).join("")}</ul>` : '<div class="empty">Keine Nachrichten vorhanden.</div>'}
     </section>
-    <p class="foot-status">Öffnet in Schulmanager, erst dort gilt ein Brief als gelesen.</p>`;
+    <p class="foot-status">Nachrichten lassen sich hier lesen, ohne dass sie in Schulmanager als gelesen gelten. Briefe öffnen in Schulmanager, erst dort gilt ein Brief als gelesen.</p>`;
 }

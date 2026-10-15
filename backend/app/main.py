@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import bell, config, ical, own
 from .friends import FriendError
 from .scheduler import Scheduler
+from .schulmanager import SchulmanagerError
 from .service import AppService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -321,6 +322,20 @@ async def own_delete(kind: str, item_id: str) -> dict[str, Any]:
 @app.get("/api/inbox", dependencies=[Depends(require_auth)])
 async def inbox() -> dict[str, Any]:
     return {"letters": service.snap("letters"), "threads": service.snap("threads")}
+
+
+@app.get("/api/thread/{subscription_id}", dependencies=[Depends(require_owner)])
+async def thread(subscription_id: str, before: str | None = None) -> dict[str, Any]:
+    """Nachrichten einer Unterhaltung lesen. Nur der Besitzer: Freunde bekommen keine Post."""
+    if before is not None and not before.isdigit():
+        raise HTTPException(status_code=400, detail="Ungültige Nachrichten-ID")
+    try:
+        return await service.thread(subscription_id, before)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden") from exc
+    except SchulmanagerError as exc:
+        log.warning("Nachrichten laden fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Nachrichten konnten nicht geladen werden: {exc}") from exc
 
 
 @app.get("/api/events", dependencies=[Depends(require_auth)])

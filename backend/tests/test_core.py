@@ -209,6 +209,55 @@ def test_thread_unread_increase():
     curr = [{"id": "1", "subject": "AG", "sender": "Krüger", "unread": 1, "last_at": "b", "preview": "Hallo", "url": "u"}]
     assert diff.diff_threads(prev, curr)[0].title == "Neue Nachricht: AG"
     assert diff.diff_threads(curr, curr) == []
+    assert diff.diff_threads(prev, curr)[0].url == "/#/post"  # ohne Nummer bleibt es bei der Post-Liste
+
+
+def test_thread_push_opens_the_conversation_in_the_app():
+    prev = [{"id": "9", "subscription_id": "42", "subject": "AG", "sender": "", "unread": 0, "last_at": "a", "preview": "", "url": "u"}]
+    curr = [dict(prev[0], unread=1, last_at="b")]
+    assert diff.diff_threads(prev, curr)[0].url == "/#/post?thread=42"
+
+
+def test_threads_keep_the_subscription_id_and_recipients():
+    raw = [{"id": "342876803", "threadId": "9001", "unreadCount": 2, "isArchived": False,
+            "thread": {"id": "9001", "subject": "AG Robotik", "senderString": "Krüger", "recipientString": "Klasse 9b",
+                       "lastMessageTimestamp": "2026-10-15T09:00:00.000Z", "lastMessage": {"text": "Treffen im C014"}}}]
+    (thread,) = normalize.threads(raw)
+    assert thread["id"] == "9001" and thread["subscription_id"] == "342876803"
+    assert thread["recipients"] == "Klasse 9b" and thread["unread"] == 2
+
+
+# Form der echten Antwort von `get-messages-by-subscription` (Inhalte erfunden)
+RAW_MESSAGES = {
+    "hasMoreMessages": True,
+    "messages": [
+        {"id": "1000012", "text": "Danke!\n\nBis morgen", "createdAt": "2026-10-14T16:05:00.000Z", "senderId": 77,
+         "threadId": "9001", "sender": {"firstname": "Demo", "lastname": "Schüler", "id": 77}, "attachments": []},
+        {"id": "999990", "text": "Bitte <b>nicht</b> vergessen: https://example.org/a?x=1&y=2", "createdAt": "2026-10-13T08:00:00.000Z",
+         "senderId": 5, "threadId": "9001", "sender": {"firstname": "Lena", "lastname": "Krüger", "id": 5},
+         "attachments": [{"id": "1", "file": "ordner/plan.pdf"}]},
+    ],
+}
+
+
+def test_messages_oldest_first_with_own_marker():
+    out = normalize.messages(RAW_MESSAGES, own_id=77)
+    assert [m["id"] for m in out["items"]] == ["999990", "1000012"]  # nach Nummer, nicht nach Text: 999990 < 1000012
+    older, newer = out["items"]
+    assert out["more"] is True
+    assert newer["mine"] is True and older["mine"] is False
+    assert older["sender"] == "Lena Krüger" and newer["sender"] == "Demo Schüler"
+    assert newer["text"] == "Danke!\n\nBis morgen"  # Zeilenumbrüche bleiben
+    assert older["text"].startswith("Bitte <b>nicht</b>")  # der Text wird nicht verändert, das Frontend maskiert ihn
+    assert older["attachments"] == ["ordner/plan.pdf"] and newer["attachments"] == []
+
+
+def test_messages_without_own_id_and_with_junk():
+    out = normalize.messages({"messages": [{"id": 3, "text": None, "senderId": 1}, "x", {"text": "ohne id"}]})
+    assert [m["id"] for m in out["items"]] == ["3"]
+    assert out["items"][0]["mine"] is False and out["items"][0]["text"] == "" and out["more"] is False
+    assert normalize.messages(None) == {"items": [], "more": False}
+    assert normalize.messages([]) == {"items": [], "more": False}
 
 
 # ── Ferien & Briefing ────────────────────────────────────────────────

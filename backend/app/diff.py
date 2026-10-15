@@ -316,6 +316,7 @@ def diff_threads(prev: list[dict[str, Any]] | None, curr: list[dict[str, Any]]) 
         old = before.get(thread["id"])
         old_unread = old["unread"] if old else 0
         if thread["unread"] > old_unread or (old and thread["unread"] > 0 and thread["last_at"] != old["last_at"]):
+            sub_id = thread.get("subscription_id")
             changes.append(
                 Change(
                     "messages",
@@ -323,7 +324,7 @@ def diff_threads(prev: list[dict[str, Any]] | None, curr: list[dict[str, Any]]) 
                     f"Neue Nachricht: {thread['subject']}",
                     (f"{thread['sender']}: " if thread["sender"] else "") + (thread["preview"] or ""),
                     None,
-                    "/#/post",
+                    f"/#/post?thread={sub_id}" if sub_id else "/#/post",
                     {"id": thread["id"], "external": thread["url"]},
                 )
             )

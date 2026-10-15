@@ -76,6 +76,67 @@ def test_endpoints_return_data(client):
     assert http.get("/cal/falsch.ics").status_code == 404
 
 
+def _first_thread(http):
+    http.post("/api/login", json={"password": "geheim"})
+    return http.get("/api/inbox").json()["threads"][0]["subscription_id"]
+
+
+def test_thread_messages_in_demo(client):
+    http, _ = client
+    assert http.get("/api/thread/501").status_code == 401  # ohne Anmeldung
+    sub = _first_thread(http)
+    body = http.get(f"/api/thread/{sub}").json()
+    assert body["thread"]["subscription_id"] == sub and body["thread"]["subject"] and body["thread"]["url"]
+    assert [m["mine"] for m in body["items"]] == [True, False] and body["more"] is True  # älteste zuerst
+
+    older = http.get(f"/api/thread/{sub}?before={body['items'][0]['id']}").json()  # Nachladen
+    assert len(older["items"]) == 1 and older["more"] is False
+    assert int(older["items"][0]["id"]) < int(body["items"][0]["id"])
+
+    assert http.get("/api/thread/999999").status_code == 404  # nur Unterhaltungen aus dem letzten Abruf
+    assert http.get(f"/api/thread/{sub}?before=abc").status_code == 400
+
+
+def test_thread_messages_only_call_the_read_endpoint(client, monkeypatch):
+    from app.schulmanager import RpcResult, SchulmanagerError
+
+    http, main = client
+    sub = _first_thread(http)
+    sent = []
+    reply = {"hasMoreMessages": False, "messages": [
+        {"id": "20", "text": "Hallo", "createdAt": "2026-10-15T09:00:00.000Z", "senderId": 77,
+         "sender": {"firstname": "Ich", "lastname": "Selbst"}, "attachments": []},
+        {"id": "10", "text": "Früher", "createdAt": "2026-10-14T09:00:00.000Z", "senderId": 5,
+         "sender": {"firstname": "", "lastname": "Krüger"}, "attachments": []},
+    ]}
+    outcome = {"result": RpcResult(200, reply)}
+
+    class FakeClient:
+        user = {"id": 77}
+
+        async def calls(self, requests):
+            sent.extend(requests)
+            if isinstance(outcome["result"], Exception):
+                raise outcome["result"]
+            return [outcome["result"]]
+
+    monkeypatch.setattr(main.owner.sync, "demo", None)
+    monkeypatch.setattr(main.owner.sync, "client", FakeClient())
+
+    body = http.get(f"/api/thread/{sub}").json()
+    assert [(m["id"], m["mine"]) for m in body["items"]] == [("10", False), ("20", True)]
+    http.get(f"/api/thread/{sub}?before=10")
+    assert [(c.module, c.endpoint) for c in sent] == [("messenger", "get-messages-by-subscription")] * 2
+    assert sent[0].parameters == {"subscriptionId": sub, "before": None, "loadAll": False}
+    assert sent[1].parameters["before"] == 10  # Zahl, so wie die Website sie schickt
+
+    outcome["result"] = RpcResult(403, None)
+    assert http.get(f"/api/thread/{sub}").status_code == 502
+    outcome["result"] = SchulmanagerError("Rate-Limit erreicht", 429, "rate-limit")
+    failed = http.get(f"/api/thread/{sub}")
+    assert failed.status_code == 502 and "Rate-Limit" in failed.json()["detail"]
+
+
 def test_login_rate_limit(client):
     http, _ = client
     for _ in range(5):

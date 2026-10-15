@@ -64,8 +64,9 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
   // Kalender-Abos und die Seiten der Freunde gehen am Service Worker vorbei: Sonst würde die Seite eines
-  // Freundes als Startseite zwischengespeichert, und geheime Links lägen im Cache.
-  const passthrough = ["/cal/", "/einladung/", "/freund/", "/api/invite/", "/api/friend/"];
+  // Freundes als Startseite zwischengespeichert, und geheime Links lägen im Cache. Nachrichtentexte
+  // (/api/thread/) bleiben ebenfalls draußen: Sie sollen nicht im Offline-Cache des Browsers liegen.
+  const passthrough = ["/cal/", "/einladung/", "/freund/", "/api/invite/", "/api/friend/", "/api/thread/"];
   if (request.method !== "GET" || url.origin !== self.location.origin || passthrough.some((p) => url.pathname.startsWith(p))) return;
 
   if (url.pathname.startsWith("/a/") || url.pathname.startsWith("/fonts/") || url.pathname.startsWith("/icons/")) {

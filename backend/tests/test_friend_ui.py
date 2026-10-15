@@ -152,6 +152,7 @@ def test_friend_has_no_owner_functions(ready):
     assert http.delete(f"/api/friends/{fid}").status_code == 403
     assert http.post(f"/api/friends/{fid}/ui", json={"offered": False}).status_code == 403
     assert http.get("/api/debug/raw/lessons").status_code == 403
+    assert http.get("/api/thread/501").status_code == 403  # Nachrichten lesen kann nur der Besitzer
     assert owner.get("/api/friends").status_code == 200  # der Besitzer darf es weiterhin
 
 

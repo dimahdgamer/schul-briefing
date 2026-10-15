@@ -12,6 +12,7 @@ from .db import Database
 from .friends import Friends
 from .holidays import SchoolCalendar
 from .push import Pusher
+from .schulmanager import RpcCall, SchulmanagerError
 from .sync import MODULES, SyncService
 
 log = logging.getLogger(__name__)
@@ -115,6 +116,29 @@ class AppService:
         if now.strftime("%H:%M") >= max(end, "16:00"):
             return self.calendar.next_school_day(today)
         return today
+
+    async def thread(self, subscription_id: str, before: str | None = None) -> dict[str, Any]:
+        """Eine Unterhaltung mit ihren Nachrichten: die neuesten 20, mit `before` (Nachrichten-ID) die davor.
+
+        Nur lesend. `get-messages-by-subscription` liefert die Nachrichten, als gelesen markiert wird erst mit
+        einem eigenen Aufruf der Website (`set-subscription-read`), den diese App nie sendet. Es gibt nur
+        Unterhaltungen aus dem letzten Abruf (`LookupError` sonst), keine frei gewählte Nummer."""
+        thread = next((t for t in self.snap("threads") if t.get("subscription_id") == subscription_id), None)
+        if thread is None:
+            raise LookupError(subscription_id)
+        if self.sync.demo is not None:
+            raw, own_id = self.sync.demo.messages(subscription_id, before), self.sync.demo.user["id"]
+        else:
+            client = self.sync.client
+            if client is None:
+                raise SchulmanagerError("Kein Schulmanager-Konto verbunden.", 0)
+            parameters = {"subscriptionId": subscription_id, "before": int(before) if before else None, "loadAll": False}
+            (result,) = await client.calls([RpcCall("messenger", "get-messages-by-subscription", parameters)])
+            if not result.ok:
+                raise SchulmanagerError(f"Schulmanager lieferte die Nachrichten nicht (HTTP {result.status}).", result.status)
+            raw, own_id = result.data, client.user.get("id")
+        meta = {key: thread.get(key) for key in ("subscription_id", "subject", "sender", "recipients", "url", "unread")}
+        return {"thread": meta, **normalize.messages(raw, own_id)}
 
     def unread_counts(self) -> tuple[int, int]:
         letters = sum(1 for l in self.snap("letters") if l.get("unread"))

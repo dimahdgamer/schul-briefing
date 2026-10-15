@@ -114,6 +114,38 @@ class DemoSource:
         self.db.set(STATE_KEY, state)
         return state
 
+    def messages(self, subscription_id: str, before: str | None = None) -> dict[str, Any]:
+        """Nachrichten einer Demo-Unterhaltung im Format von `get-messages-by-subscription`.
+
+        Zwei Nachrichten pro Seite und eine ältere dahinter, damit sich auch das Nachladen ausprobieren lässt."""
+        state = self.db.get(STATE_KEY) or {}
+        sub = next((t for t in state.get("threads", []) if str(t["id"]) == str(subscription_id)), None)
+        if sub is None:
+            return {"messages": [], "hasMoreMessages": False}
+        thread = sub["thread"]
+        base = int(thread["id"]) * 10
+        last_at = thread["lastMessageTimestamp"]
+        sender = thread["senderString"].split(",")[0]
+
+        def message(number: int, text: str, mine: bool, at: str) -> dict[str, Any]:
+            return {
+                "id": str(base + number), "text": text, "createdAt": at, "threadId": str(thread["id"]),
+                "senderId": 1 if mine else 2,
+                "sender": {"id": 1, "firstname": "Demo", "lastname": "Schüler"} if mine
+                else {"id": 2, "firstname": "", "lastname": sender},
+                "attachments": [],
+            }
+
+        day = datetime.fromisoformat(last_at)
+        everything = [
+            message(1, "Hallo,\nkurze Frage zum nächsten Treffen: Wann geht es los?", False, (day - timedelta(days=2)).isoformat()),
+            message(2, "Alles klar, ich bin dabei. Danke!", True, (day - timedelta(days=1)).isoformat()),
+            message(3, thread["lastMessage"]["text"], False, last_at),
+        ]
+        if before:
+            return {"messages": [m for m in everything if int(m["id"]) < int(before)], "hasMoreMessages": False}
+        return {"messages": everything[1:], "hasMoreMessages": True}
+
     def _next_id(self, state: dict[str, Any]) -> int:
         state["next_id"] += 1
         return state["next_id"]
