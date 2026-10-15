@@ -501,6 +501,8 @@ def threads(raw: Any) -> list[dict[str, Any]]:
                 "subject": _s(thread.get("subject")) or "Nachricht",
                 "sender": _s(thread.get("senderString")),
                 "recipients": _s(thread.get("recipientString")),
+                # Wie die Website: Antworten darf, wer Administrator der Unterhaltung ist oder wo Antworten erlaubt sind
+                "can_answer": bool(sub.get("isAdministrator") or thread.get("allowAnswers")),
                 "last_at": _s(thread.get("lastMessageTimestamp")),
                 "unread": int(sub.get("unreadCount") or 0),
                 "preview": _strip_html(_s(last.get("text")))[:160],

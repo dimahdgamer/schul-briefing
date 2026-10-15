@@ -1619,6 +1619,91 @@ kbd {
   margin-top: 22px;
 }
 
+/* Antworten */
+.compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 22px;
+}
+.compose-text {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  max-height: 260px;
+  padding: 10px 12px;
+  font-size: 16px; /* unter 16px zoomt iOS beim Antippen ins Feld */
+  line-height: 1.5;
+  resize: vertical;
+  overflow-y: auto;
+}
+.compose-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.compose-hint {
+  flex: 1 1 220px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.compose-count {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.compose-count:not([hidden]) {
+  display: inline;
+}
+.compose-off {
+  margin: 22px 0 0;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.send-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.send-facts div {
+  display: flex;
+  gap: 12px;
+}
+.send-facts dt {
+  flex: none;
+  width: 104px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.send-facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.send-preview {
+  max-height: 40vh;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: 14.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.send-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* ── Woche ──────────────────────────────────────────────────────── */
 
 .week {

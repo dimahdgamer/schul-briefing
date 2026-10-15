@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
+import time
 from collections import OrderedDict
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -26,8 +28,28 @@ FILE_LIMIT = 25 * 1024 * 1024  # größer als das wird nicht geladen (die Datei 
 FILE_MEMORY = 400  # so viele Anhänge merkt sich die App (siehe `_remember_files`)
 
 
+MESSAGE_LIMIT = 3000  # so lang darf eine Nachricht bei Schulmanager höchstens sein
+SEND_BURST = 6  # so viele Nachrichten darf die App pro Minute senden
+SENT_MEMORY = 50  # so viele gesendete Anfragen merkt sie sich gegen doppeltes Senden
+
+
 class FileTooLarge(Exception):
     pass
+
+
+class NotAllowed(Exception):
+    """In dieser Unterhaltung sind keine Antworten erlaubt."""
+
+
+class TooManyMessages(Exception):
+    pass
+
+
+class SendRefused(SchulmanagerError):
+    """Schulmanager hat die Nachricht nicht angenommen (oder es ist unklar, ob sie ankam). Der Text ist für Nutzer gedacht."""
+
+    def __init__(self, message: str, kind: str = "refused") -> None:
+        super().__init__(message, 0, kind)
 
 
 class AppService:
@@ -52,6 +74,9 @@ class AppService:
         self.friends: Friends | None = Friends(cfg, self.db, self.pusher) if standalone else None
         self._files: OrderedDict[tuple[str, str, str], str] = OrderedDict()  # Anhänge der zuletzt geöffneten Nachrichten
         self._storage_url: str | None = None
+        self._sent: OrderedDict[tuple[str, str], dict[str, Any] | None] = OrderedDict()  # (Unterhaltung, request_id) -> Nachricht
+        self._send_times: list[float] = []
+        self._send_lock = asyncio.Lock()
         cal_events = self.db.snapshot("calendar")
         if cal_events:
             self.calendar.set_calendar_holidays(cal_events)
@@ -140,7 +165,7 @@ class AppService:
         thread = self._known_thread(subscription_id)
         raw, own_id = await self._fetch_messages(subscription_id, int(before) if before else None)
         self._remember_files(subscription_id, raw)
-        meta = {key: thread.get(key) for key in ("subscription_id", "subject", "sender", "recipients", "url", "unread")}
+        meta = {key: thread.get(key) for key in ("subscription_id", "subject", "sender", "recipients", "url", "unread", "can_answer")}
         return {"thread": meta, **normalize.messages(raw, own_id)}
 
     def _known_thread(self, subscription_id: str) -> dict[str, Any]:
@@ -250,6 +275,73 @@ class AppService:
                 raise SchulmanagerError(f"Schulmanager hat die Unterhaltung nicht als gelesen markiert (HTTP {result.status}).", result.status)
         self.db.save_snapshot("threads", [dict(t, unread=0) if t is thread else t for t in threads])
         return {"unread": 0, "changed": True}
+
+    async def send_message(self, subscription_id: str, text: str, request_id: str) -> dict[str, Any]:
+        """Auf eine Unterhaltung antworten (`send-message`): nur Text, keine Anhänge, nie als dringlich.
+
+        Eine gesendete Nachricht lässt sich nicht zurückholen, deshalb mehrfach abgesichert:
+        - gesendet wird nur, wo Schulmanager es erlaubt (frisch geprüft, wie die Website: Administrator der
+          Unterhaltung oder `allowAnswers`) und nur an Unterhaltungen aus dem letzten Abruf
+        - dieselbe `request_id` sendet nie zweimal (Doppeltipp, erneutes Absenden, Wiederholung nach Zeitüberschreitung)
+        - höchstens `SEND_BURST` Nachrichten pro Minute, falls irgendwo eine Schleife läuft
+        - Länge wie bei Schulmanager (3000 Zeichen), Zeilenumbrüche bleiben erhalten"""
+        thread = self._known_thread(subscription_id)
+        if self.sync.demo is not None and not thread.get("can_answer"):
+            raise NotAllowed(subscription_id)  # echt wird das frisch bei Schulmanager geprüft (in `_deliver`)
+        text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not text:
+            raise ValueError("Die Nachricht ist leer.")
+        if len(text) > MESSAGE_LIMIT:
+            raise ValueError(f"Die Nachricht ist mit {len(text)} Zeichen zu lang. Erlaubt sind höchstens {MESSAGE_LIMIT}.")
+        async with self._send_lock:  # nacheinander, damit ein doppelter Aufruf wirklich den ersten sieht
+            key = (subscription_id, request_id)
+            if key in self._sent:
+                return {"message": self._sent[key], "duplicate": True}
+            now = time.monotonic()
+            self._send_times = [t for t in self._send_times if now - t < 60]
+            if len(self._send_times) >= SEND_BURST:
+                raise TooManyMessages()
+            message = await self._deliver(subscription_id, text)
+            self._send_times.append(now)
+            self._sent[key] = message
+            while len(self._sent) > SENT_MEMORY:
+                self._sent.popitem(last=False)
+        return {"message": message, "duplicate": False}
+
+    async def _deliver(self, subscription_id: str, text: str) -> dict[str, Any] | None:
+        if self.sync.demo is not None:
+            raw, own_id = self.sync.demo.send_message(subscription_id, text), self.sync.demo.user["id"]
+        else:
+            client = self.sync.client
+            if client is None:
+                raise SchulmanagerError("Kein Schulmanager-Konto verbunden.", 0)
+            # Frisch laden: aktuelle Rechte, und die Unterhaltung genau so, wie die Website sie mitschickt
+            (listing,) = await client.calls([RpcCall("messenger", "get-subscriptions", {"all": True, "includeArchived": False})])
+            if not listing.ok:
+                raise SchulmanagerError(f"Schulmanager lieferte die Unterhaltungen nicht (HTTP {listing.status}).", listing.status)
+            sub = next((s for s in listing.data or [] if isinstance(s, dict) and str(s.get("id")) == subscription_id), None)
+            if sub is None:
+                raise LookupError(subscription_id)
+            thread = sub.get("thread") if isinstance(sub.get("thread"), dict) else {}
+            if not (sub.get("isAdministrator") or thread.get("allowAnswers")):
+                raise NotAllowed(subscription_id)
+            try:
+                (result,) = await client.calls([RpcCall("messenger", "send-message", {"thread": thread, "text": text, "attachments": []})])
+            except SchulmanagerError as exc:
+                if exc.kind == "network":  # die Anfrage ging womöglich raus
+                    raise SendRefused("Die Verbindung brach ab. Ob die Nachricht angekommen ist, ist unklar. "
+                                      "Bitte die Unterhaltung neu laden und nachsehen, bevor du erneut sendest.", "unknown") from exc
+                raise
+            if not result.ok:
+                error = result.error or {}
+                kind = str(error.get("errorType") or "")
+                if kind == "quiet_hours_active":
+                    raise SendRefused("Die Ruhezeit der Schule hat begonnen. Die Nachricht wurde nicht gesendet.", kind)
+                raise SendRefused(str(error.get("germanErrorMessage") or "")
+                                  or f"Schulmanager hat die Nachricht nicht angenommen (HTTP {result.status}).", kind or "refused")
+            raw, own_id = result.data, client.user.get("id")
+        items = normalize.messages({"messages": [raw] if isinstance(raw, dict) else []}, own_id)["items"]
+        return items[0] if items else None  # unerwartete Antwort: die Ansicht lädt die Unterhaltung dann neu
 
     def unread_counts(self) -> tuple[int, int]:
         letters = sum(1 for l in self.snap("letters") if l.get("unread"))

@@ -314,6 +314,145 @@ def test_attachment_download_only_serves_safe_types_inline(client, monkeypatch):
     assert http.get(base + "1").status_code == 502
 
 
+def _threads(http):
+    return http.get("/api/inbox").json()["threads"]
+
+
+def _send(http, sub, text="Hallo", request_id="req-00000001"):
+    return http.post(f"/api/thread/{sub}/send", json={"text": text, "request_id": request_id})
+
+
+def test_send_message_in_demo(client):
+    http, _ = client
+    assert _send(http, "501").status_code == 401  # ohne Anmeldung
+    http.post("/api/login", json={"password": "geheim"})
+    threads = _threads(http)
+    allowed = next(t for t in threads if t["can_answer"])["subscription_id"]
+    forbidden = next(t for t in threads if not t["can_answer"])["subscription_id"]
+
+    text = "Hallo Frau Vogt,\r\n\r\nbis morgen!   \n"
+    sent = _send(http, allowed, text).json()
+    assert sent["duplicate"] is False
+    message = sent["message"]
+    assert message["mine"] is True and message["text"] == "Hallo Frau Vogt,\n\nbis morgen!"  # Zeilenumbrüche bleiben, Ränder weg
+
+    again = _send(http, allowed, text).json()  # derselbe Versuch (Doppeltipp): nicht noch einmal
+    assert again["duplicate"] is True and again["message"]["id"] == message["id"]
+    assert [m["id"] for m in http.get(f"/api/thread/{allowed}").json()["items"]].count(message["id"]) == 1
+
+    assert _send(http, allowed, "", "req-00000002").status_code == 400
+    assert _send(http, allowed, " \n ", "req-00000002").status_code == 400
+    assert _send(http, allowed, "x" * 3001, "req-00000002").status_code == 400
+    assert _send(http, allowed, "x" * 3000, "req-00000003").status_code == 200  # genau das Limit geht
+    assert _send(http, allowed, "Hallo", "kurz").status_code == 400  # ungültige request_id
+    assert http.post(f"/api/thread/{allowed}/send", json={"text": 5, "request_id": "req-00000004"}).status_code == 400
+    assert _send(http, forbidden, "Hallo", "req-00000005").status_code == 403  # hier sind keine Antworten erlaubt
+    assert _send(http, "999999", "Hallo", "req-00000006").status_code == 404
+
+
+class _Sender:
+    """Stand-in für den Schulmanager-Client: merkt sich die Aufrufe und liefert vorbereitete Antworten."""
+
+    def __init__(self, sub, thread, admin=False):
+        from app.schulmanager import RpcResult
+
+        self.user = {"id": 77}
+        self.sent = []
+        self.thread = thread
+        self.subscription = {"id": sub, "threadId": thread["id"], "isAdministrator": admin, "unreadCount": 0, "thread": thread}
+        self.listing = [self.subscription]
+        self.reply = RpcResult(200, {"id": "30", "text": "x", "createdAt": "2026-10-15T09:00:00.000Z", "senderId": 77,
+                                     "sender": {"firstname": "Ich", "lastname": "Selbst"}, "attachments": []})
+
+    async def calls(self, requests):
+        from app.schulmanager import RpcResult
+
+        out = []
+        for request in requests:
+            self.sent.append(request)
+            if request.endpoint == "get-subscriptions":
+                out.append(RpcResult(200, self.listing))
+            elif isinstance(self.reply, Exception):
+                raise self.reply
+            else:
+                out.append(self.reply)
+        return out
+
+    def endpoints(self):
+        return [c.endpoint for c in self.sent]
+
+
+def _real_sender(client, monkeypatch, allow=True, admin=False):
+    http, main = client
+    http.post("/api/login", json={"password": "geheim"})
+    sub = next(t for t in _threads(http) if t["can_answer"])["subscription_id"]
+    thread = {"id": "9001", "subject": "Material", "senderString": "Vogt", "recipientString": "9b", "isPrivateChat": False,
+              "allowAnswers": allow, "lastMessageTimestamp": "2026-10-15T08:00:00.000Z"}
+    fake = _Sender(sub, thread, admin)
+    monkeypatch.setattr(main.owner.sync, "demo", None)
+    monkeypatch.setattr(main.owner.sync, "client", fake)
+    return http, sub, fake
+
+
+def test_send_message_sends_what_the_website_sends(client, monkeypatch):
+    http, sub, fake = _real_sender(client, monkeypatch)
+    body = _send(http, sub, "Hallo\n\nZweite Zeile").json()
+    assert fake.endpoints() == ["get-subscriptions", "send-message"]
+    send = fake.sent[-1]
+    assert (send.module, send.endpoint) == ("messenger", "send-message")
+    # die Unterhaltung genau so, wie sie Schulmanager geliefert hat, dazu Text mit Zeilenumbrüchen, keine Anhänge
+    assert send.parameters == {"thread": fake.thread, "text": "Hallo\n\nZweite Zeile", "attachments": []}
+    assert "urgent" not in send.parameters  # nie als dringlich
+    assert body["message"]["id"] == "30" and body["message"]["mine"] is True and body["duplicate"] is False
+
+    assert _send(http, sub, "Hallo\n\nZweite Zeile").json()["duplicate"] is True  # dieselbe request_id
+    assert fake.endpoints().count("send-message") == 1  # und wurde nicht noch einmal gesendet
+
+
+def test_send_message_checks_the_current_rights_and_reports_refusals(client, monkeypatch):
+    from app.schulmanager import RpcResult, SchulmanagerError
+
+    # Antworten sind inzwischen nicht mehr erlaubt (der lokale Stand ist älter): es wird nichts gesendet
+    http, sub, fake = _real_sender(client, monkeypatch, allow=False)
+    assert _send(http, sub).status_code == 403 and "send-message" not in fake.endpoints()
+    fake.subscription["isAdministrator"] = True  # Administrator der Unterhaltung darf trotzdem
+    assert _send(http, sub, "Hallo", "req-00000002").status_code == 200
+    fake.listing = []  # die Unterhaltung gibt es bei Schulmanager nicht mehr
+    assert _send(http, sub, "Hallo", "req-00000003").status_code == 404
+
+    fake.listing = [fake.subscription]
+    fake.reply = RpcResult(400, None, {"errorType": "quiet_hours_active", "germanErrorMessage": "Ruhezeit"})
+    refused = _send(http, sub, "Hallo", "req-00000004")
+    assert refused.status_code == 502 and "Ruhezeit" in refused.json()["detail"] and "nicht gesendet" in refused.json()["detail"]
+    fake.reply = RpcResult(400, None, {"errorType": "x", "germanErrorMessage": "Sie dürfen hier nicht schreiben."})
+    assert "Sie dürfen hier nicht schreiben." in _send(http, sub, "Hallo", "req-00000005").json()["detail"]
+    fake.reply = RpcResult(500, None)
+    assert "HTTP 500" in _send(http, sub, "Hallo", "req-00000006").json()["detail"]
+
+    # Verbindung bricht nach dem Senden ab: Ob es ankam, ist unklar. Das sagt die App, statt blind zu wiederholen.
+    fake.reply = SchulmanagerError("Netzwerkfehler", 0, "network")
+    unclear = _send(http, sub, "Hallo", "req-00000007")
+    assert unclear.status_code == 502 and "unklar" in unclear.json()["detail"]
+    fake.reply = SchulmanagerError("Rate-Limit erreicht", 429, "rate-limit")  # da ging nichts raus
+    assert "nicht gesendet" in _send(http, sub, "Hallo", "req-00000008").json()["detail"]
+    # Ein Fehlversuch zählt nicht als gesendet: derselbe Text mit derselben ID darf danach klappen
+    fake.reply = RpcResult(200, {"id": "31", "text": "Hallo", "createdAt": "2026-10-15T09:01:00.000Z", "senderId": 77,
+                                 "sender": {}, "attachments": []})
+    assert _send(http, sub, "Hallo", "req-00000008").json()["message"]["id"] == "31"
+
+    # Unerwartete Antwort: die Nachricht kam an, die Ansicht lädt dann neu (message ist leer)
+    fake.reply = RpcResult(200, None)
+    assert _send(http, sub, "Noch eine", "req-00000009").json()["message"] is None
+
+
+def test_send_message_is_rate_limited(client, monkeypatch):
+    http, sub, fake = _real_sender(client, monkeypatch)
+    for number in range(6):
+        assert _send(http, sub, f"Nachricht {number}", f"req-1000000{number}").status_code == 200
+    blocked = _send(http, sub, "Nachricht 7", "req-10000007")
+    assert blocked.status_code == 429 and fake.endpoints().count("send-message") == 6  # die siebte geht nicht raus
+
+
 def test_login_rate_limit(client):
     http, _ = client
     for _ in range(5):

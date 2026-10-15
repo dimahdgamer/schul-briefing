@@ -25,7 +25,7 @@ from . import bell, config, ical, own
 from .friends import FriendError
 from .scheduler import Scheduler
 from .schulmanager import SchulmanagerError
-from .service import AppService, FileTooLarge
+from .service import AppService, FileTooLarge, NotAllowed, SendRefused, TooManyMessages
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("schule")
@@ -380,6 +380,31 @@ async def thread_file(subscription_id: str, message_id: str, attachment_id: str,
     if inline and info["type"].startswith("image/"):
         headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
     return Response(data, media_type=info["type"] if inline else "application/octet-stream", headers=headers)
+
+
+@app.post("/api/thread/{subscription_id}/send", dependencies=[Depends(require_owner)])
+async def thread_send(subscription_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Auf eine Unterhaltung antworten. `request_id` kommt vom Browser und sorgt dafür, dass derselbe Versuch
+    (Doppeltipp, erneutes Absenden) nie zweimal sendet."""
+    text, request_id = body.get("text"), str(body.get("request_id") or "")
+    if not isinstance(text, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", request_id):
+        raise HTTPException(status_code=400, detail="Ungültige Angabe")
+    try:
+        return await service.send_message(subscription_id, text, request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden") from exc
+    except NotAllowed as exc:
+        raise HTTPException(status_code=403, detail="In dieser Unterhaltung sind keine Antworten erlaubt.") from exc
+    except TooManyMessages as exc:
+        raise HTTPException(status_code=429, detail="Zu viele Nachrichten hintereinander. Bitte kurz warten.") from exc
+    except SendRefused as exc:
+        log.warning("Nachricht nicht gesendet: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except SchulmanagerError as exc:
+        log.warning("Nachricht senden fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Die Nachricht wurde nicht gesendet: {exc}") from exc
 
 
 @app.post("/api/thread/{subscription_id}/read", dependencies=[Depends(require_owner)])

@@ -57,6 +57,8 @@ class RpcCall:
 class RpcResult:
     status: int
     data: Any
+    # Fehler, die Schulmanager für Nutzer gedacht hat (Status 400): {"errorType": ..., "germanErrorMessage": ...}
+    error: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -233,5 +235,7 @@ class SchulmanagerClient:
                 status = raw.get("status", 200)
                 if isinstance(status, str):
                     status = 200 if status in {"ok", "success"} else 500
-                results.append(RpcResult(status=int(status), data=raw.get("data")))
+                user_error = raw.get("userError")
+                results.append(RpcResult(status=int(status), data=raw.get("data"),
+                                         error=user_error if isinstance(user_error, dict) else None))
             return results

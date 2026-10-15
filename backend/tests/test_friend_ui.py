@@ -155,6 +155,7 @@ def test_friend_has_no_owner_functions(ready):
     assert http.get("/api/thread/501").status_code == 403  # Nachrichten lesen und als gelesen markieren kann nur der Besitzer
     assert http.post("/api/thread/501/read", json={"message_id": "1"}).status_code == 403
     assert http.get("/api/thread/501/file/1/2").status_code == 403  # auch Anhänge nicht
+    assert http.post("/api/thread/501/send", json={"text": "Hallo", "request_id": "req-00000001"}).status_code == 403  # und nicht antworten
     assert owner.get("/api/friends").status_code == 200  # der Besitzer darf es weiterhin
 
 

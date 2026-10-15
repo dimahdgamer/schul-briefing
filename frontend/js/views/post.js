@@ -129,10 +129,11 @@ async function renderThread(main, subscriptionId, ctx) {
     ${meta ? `<p class="thread-meta reveal">${esc(meta)}</p>` : ""}
     <div class="thread-more" hidden><button class="btn small" type="button">Ältere Nachrichten laden</button></div>
     <div class="msgs"></div>
+    ${thread.can_answer ? COMPOSE : '<p class="compose-off">In dieser Unterhaltung sind keine Antworten möglich.</p>'}
     <div class="btn-row thread-actions">
       <a class="btn small" href="${esc(thread.url)}" target="_blank" rel="noopener">${icon("arrow-right", "sm")}In Schulmanager öffnen</a>
     </div>
-    <p class="foot-status">Beim Öffnen gilt die Unterhaltung in Schulmanager als gelesen. Antworten geht noch nur dort.</p>`;
+    <p class="foot-status">Beim Öffnen gilt die Unterhaltung in Schulmanager als gelesen.</p>`;
 
   const list = main.querySelector(".msgs");
   const moreBox = main.querySelector(".thread-more");
@@ -178,10 +179,158 @@ async function renderThread(main, subscriptionId, ctx) {
     const foot = main.querySelector(".foot-status");
     api(`${path}/read`, { method: "POST", body: { message_id: items[items.length - 1].id } })
       .then(() => {
-        foot.textContent = "In Schulmanager als gelesen markiert. Antworten geht noch nur dort.";
+        foot.textContent = "In Schulmanager als gelesen markiert.";
       })
       .catch((error) => toast(error.message || "Konnte nicht als gelesen markiert werden.", "error"));
   }
+
+  if (thread.can_answer) wireCompose();
+
+  // ── Antworten ──
+  // Enter macht eine neue Zeile (auf dem Handy und am Rechner), gesendet wird nur mit dem Knopf oder Strg/Cmd+Enter,
+  // und immer erst nach einer Bestätigung: Eine gesendete Nachricht lässt sich nicht zurückholen.
+  function wireCompose() {
+    const form = main.querySelector(".compose");
+    const input = form.querySelector("textarea");
+    const send = form.querySelector("[type=submit]");
+    const count = form.querySelector(".compose-count");
+    const draftKey = `reply-draft:${thread.subscription_id}`;
+    let attempt = null; // derselbe Text behält seine request_id, so sendet ein wiederholter Versuch nie doppelt
+
+    const draft = {
+      load: () => { try { return sessionStorage.getItem(draftKey) || ""; } catch { return ""; } },
+      save: (text) => { try { text ? sessionStorage.setItem(draftKey, text) : sessionStorage.removeItem(draftKey); } catch { /* Entwurf ist nur Komfort */ } },
+    };
+
+    function refresh() {
+      send.disabled = !input.value.trim();
+      input.style.height = "auto";
+      input.style.height = `${Math.min(input.scrollHeight + 2, 260)}px`;
+      const length = input.value.length;
+      count.hidden = length < 2500;
+      count.textContent = `${length.toLocaleString("de-DE")} / ${MESSAGE_LIMIT.toLocaleString("de-DE")}`;
+    }
+
+    input.value = draft.load();
+    refresh();
+    input.addEventListener("input", () => {
+      draft.save(input.value);
+      refresh();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      if (!attempt || attempt.text !== text) attempt = { text, id: newRequestId() };
+      confirmSend({
+        thread,
+        text,
+        onSend: async () => {
+          const result = await api(`${path}/send`, { method: "POST", body: { text, request_id: attempt.id } });
+          if (!ctx.isCurrent()) return;
+          attempt = null;
+          input.value = "";
+          draft.save("");
+          refresh();
+          if (!result.message) return ctx.rerender(); // unerwartete Antwort von Schulmanager: Unterhaltung neu laden
+          if (!items.some((m) => m.id === result.message.id)) items = [...items, result.message];
+          draw();
+          requestAnimationFrame(() => list.lastElementChild?.scrollIntoView({ block: "end" }));
+          toast(result.duplicate ? "Diese Nachricht war schon gesendet." : "Nachricht gesendet.");
+        },
+      });
+    });
+  }
+}
+
+const MESSAGE_LIMIT = 3000; // wie bei Schulmanager
+
+const COMPOSE = `
+  <form class="compose" novalidate>
+    <label class="field-label" for="reply-text">Antworten</label>
+    <textarea id="reply-text" class="input compose-text" rows="3" maxlength="${MESSAGE_LIMIT}" placeholder="Antwort schreiben …" autocomplete="off"></textarea>
+    <div class="compose-foot">
+      <span class="compose-hint">Enter macht eine neue Zeile. Gesendet wird erst nach deiner Bestätigung.</span>
+      <span class="compose-count" hidden></span>
+      <button type="submit" class="btn primary small" disabled>Senden …</button>
+    </div>
+  </form>`;
+
+function newRequestId() {
+  if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+  return Array.from({ length: 24 }, () => Math.floor(Math.random() * 36).toString(36)).join("");
+}
+
+// Bestätigung vor dem Senden: Unterhaltung, Empfänger und der Text so, wie er ankommt. `onSend` wirft bei Fehlern,
+// die Meldung erscheint dann im Fenster und der Text bleibt erhalten.
+function confirmSend({ thread, text, onSend }) {
+  const to = thread.recipients || thread.sender || "";
+  const dialog = document.createElement("dialog");
+  dialog.className = "sheet";
+  dialog.setAttribute("aria-labelledby", "send-title");
+  dialog.tabIndex = -1;
+  dialog.innerHTML = `
+    <div class="sheet-body">
+      <header class="sheet-head">
+        <h2 id="send-title">Nachricht senden?</h2>
+        <button type="button" class="btn ghost small" data-act="cancel">Abbrechen</button>
+      </header>
+      <p class="sheet-error" role="alert" hidden></p>
+      <dl class="send-facts">
+        <div><dt>Unterhaltung</dt><dd>${esc(thread.subject)}</dd></div>
+        ${to ? `<div><dt>Empfänger</dt><dd>${esc(to)}</dd></div>` : ""}
+      </dl>
+      <div class="send-preview">${esc(text)}</div>
+      <p class="send-note">Eine gesendete Nachricht lässt sich nicht zurückholen.</p>
+      <div class="sheet-actions"><span></span><button type="button" class="btn primary" data-act="send">Jetzt senden</button></div>
+    </div>`;
+  document.body.appendChild(dialog);
+
+  const error = dialog.querySelector(".sheet-error");
+  const sendButton = dialog.querySelector('[data-act="send"]');
+  const cancelButton = dialog.querySelector('[data-act="cancel"]');
+  let sending = false;
+  const close = () => {
+    dialog.close();
+    dialog.remove();
+  };
+
+  cancelButton.addEventListener("click", close);
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog && !sending) close();
+  });
+  dialog.addEventListener("cancel", (event) => {
+    if (sending) event.preventDefault(); // Esc während des Sendens ignorieren
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  sendButton.addEventListener("click", async () => {
+    if (sending) return;
+    sending = true;
+    error.hidden = true;
+    sendButton.disabled = cancelButton.disabled = true;
+    sendButton.textContent = "Sende …";
+    try {
+      await onSend();
+      close();
+    } catch (failure) {
+      error.textContent = failure.message || "Das hat nicht geklappt.";
+      error.hidden = false;
+      sendButton.textContent = "Erneut senden";
+      sendButton.disabled = cancelButton.disabled = false;
+    } finally {
+      sending = false;
+    }
+  });
+
+  dialog.showModal();
+  dialog.focus({ preventScroll: true });
 }
 
 // ── Liste ────────────────────────────────────────────────────────────

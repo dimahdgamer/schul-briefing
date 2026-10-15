@@ -705,3 +705,42 @@ def test_attachment_files_map_message_and_attachment_to_the_download_text():
     assert list(files) == [("999990", "1")]
     assert "GEHEIMER-SCHLUESSEL" in files[("999990", "1")]  # nur für den Download auf dem Server
     assert normalize.attachment_files(None) == {} and normalize.attachment_files({"messages": ["x", {"id": 1}]}) == {}
+
+
+def test_threads_say_where_answers_are_allowed():
+    def sub(admin, allow):
+        return {"id": "1", "threadId": "9", "isAdministrator": admin, "unreadCount": 0, "isArchived": False,
+                "thread": {"id": "9", "subject": "x", "allowAnswers": allow}}
+    answers = [normalize.threads([sub(admin, allow)])[0]["can_answer"] for admin, allow in
+               ((False, False), (False, True), (True, False), (True, True))]
+    assert answers == [False, True, True, True]  # wie die Website: Administrator der Unterhaltung oder allowAnswers
+
+
+def test_client_keeps_the_user_error_of_a_call():
+    import asyncio
+
+    from app.schulmanager import RpcCall, SchulmanagerClient
+
+    class Response:
+        status_code = 200
+        headers: dict = {}
+
+        @staticmethod
+        def json():
+            return {"results": [
+                {"status": 400, "userError": {"errorType": "quiet_hours_active", "germanErrorMessage": "Ruhezeit"}},
+                {"status": 200, "data": [1]},
+                {"status": 500, "userError": "kein Objekt"},
+            ]}
+
+    client = SchulmanagerClient("a", "b")
+    client.token, client.user = "t", {"id": 1}
+
+    async def post(path, body, auth=True):
+        return Response()
+
+    client._post = post
+    first, second, third = asyncio.run(client.calls([RpcCall("m", "a"), RpcCall("m", "b"), RpcCall("m", "c")]))
+    assert not first.ok and first.error == {"errorType": "quiet_hours_active", "germanErrorMessage": "Ruhezeit"}
+    assert second.ok and second.error is None and second.data == [1]
+    assert not third.ok and third.error is None  # nur echte Fehlerobjekte zählen

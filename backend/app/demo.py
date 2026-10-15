@@ -130,10 +130,10 @@ class DemoSource:
             self._add_letter(state, title, sender, today - timedelta(days=i * 4 + 1), read=i > 0)
         state["threads"] = [
             {"id": 501, "threadId": 9001, "unreadCount": 1, "isArchived": False,
-             "thread": {"id": 9001, "subject": "Material für Kunst", "senderString": "Vogt, Kunst",
+             "thread": {"id": 9001, "subject": "Material für Kunst", "senderString": "Vogt, Kunst", "recipientString": "9b", "allowAnswers": True,
                         "lastMessageTimestamp": f"{today.isoformat()}T07:12:00", "lastMessage": {"text": "Bitte bis Mittwoch Wasserfarben mitbringen."}}},
             {"id": 502, "threadId": 9002, "unreadCount": 0, "isArchived": False,
-             "thread": {"id": 9002, "subject": "AG Robotik", "senderString": "Krüger",
+             "thread": {"id": 9002, "subject": "AG Robotik", "senderString": "Krüger", "allowAnswers": False,
                         "lastMessageTimestamp": f"{(today - timedelta(days=3)).isoformat()}T15:40:00", "lastMessage": {"text": "Treffen diese Woche im C014."}}},
         ]
         self.db.set(STATE_KEY, state)
@@ -175,9 +175,24 @@ class DemoSource:
                 attachment(13, "application/zip", "Material.zip", 2048),
             ]),
         ]
+        everything += state.get("sent", {}).get(str(subscription_id), [])  # im Demo gesendete Antworten
         if before:
             return {"messages": [m for m in everything if int(m["id"]) < int(before)], "hasMoreMessages": False}
         return {"messages": everything[1:], "hasMoreMessages": True}
+
+    def send_message(self, subscription_id: str, text: str) -> dict[str, Any]:
+        """Antwort in einer Demo-Unterhaltung: bleibt im Demo-Zustand und erscheint in `messages`."""
+        state = self.db.get(STATE_KEY) or {}
+        sent = state.setdefault("sent", {}).setdefault(str(subscription_id), [])
+        sub = next(t for t in state["threads"] if str(t["id"]) == str(subscription_id))
+        message = {
+            "id": str(int(sub["thread"]["id"]) * 10 + 100 + len(sent)), "text": text,
+            "createdAt": datetime.now().isoformat(timespec="seconds"), "threadId": str(sub["thread"]["id"]),
+            "senderId": 1, "sender": {"id": 1, "firstname": "Demo", "lastname": "Schüler"}, "attachments": [],
+        }
+        sent.append(message)
+        self.db.set(STATE_KEY, state)
+        return message
 
     def file_bytes(self, mime: str) -> bytes:
         """Inhalt eines Demo-Anhangs: ein Bild, ein PDF, sonst irgendwelche Bytes."""
