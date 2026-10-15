@@ -137,6 +137,65 @@ def test_thread_messages_only_call_the_read_endpoint(client, monkeypatch):
     assert failed.status_code == 502 and "Rate-Limit" in failed.json()["detail"]
 
 
+def _unread_thread(http):
+    threads = http.get("/api/inbox").json()["threads"]
+    return next(t["subscription_id"] for t in threads if t["unread"])
+
+
+def _unread_of(http, sub):
+    return next(t for t in http.get("/api/inbox").json()["threads"] if t["subscription_id"] == sub)["unread"]
+
+
+def test_mark_thread_read_in_demo(client):
+    http, _ = client
+    assert http.post("/api/thread/501/read", json={"message_id": "10"}).status_code == 401  # ohne Anmeldung
+    http.post("/api/login", json={"password": "geheim"})
+    sub = _unread_thread(http)
+    assert http.post(f"/api/thread/{sub}/read", json={"message_id": "10"}).json() == {"unread": 0, "changed": True}
+    assert _unread_of(http, sub) == 0  # Liste und Zähler stimmen sofort
+    assert http.post(f"/api/thread/{sub}/read", json={"message_id": "10"}).json() == {"unread": 0, "changed": False}
+    assert http.post(f"/api/thread/{sub}/read", json={"message_id": "abc"}).status_code == 400
+    assert http.post(f"/api/thread/{sub}/read", json={}).status_code == 400
+    assert http.post("/api/thread/999999/read", json={"message_id": "10"}).status_code == 404
+
+
+def test_mark_thread_read_sends_the_call_of_the_website(client, monkeypatch):
+    from app.schulmanager import RpcResult
+
+    http, main = client
+    http.post("/api/login", json={"password": "geheim"})
+    sub = _unread_thread(http)
+    sent = []
+    outcome = {"result": RpcResult(200, {"ok": True})}
+
+    class FakeClient:
+        user = {"id": 77}
+
+        async def calls(self, requests):
+            sent.extend(requests)
+            return [outcome["result"]]
+
+    monkeypatch.setattr(main.owner.sync, "demo", None)
+    monkeypatch.setattr(main.owner.sync, "client", FakeClient())
+
+    # Fehler von Schulmanager: nichts wird lokal als gelesen gemerkt
+    outcome["result"] = RpcResult(403, None)
+    assert http.post(f"/api/thread/{sub}/read", json={"message_id": "20"}).status_code == 502
+    assert _unread_of(http, sub) > 0
+
+    outcome["result"] = RpcResult(200, {"ok": True})
+    assert http.post(f"/api/thread/{sub}/read", json={"message_id": "20"}).json()["changed"] is True
+    assert _unread_of(http, sub) == 0
+    assert [(c.module, c.endpoint) for c in sent] == [("messenger", "set-subscription-read")] * 2
+    # genau so ruft es die Website beim Öffnen auf
+    assert sent[-1].parameters == {"subscription": {"id": sub}, "message": {"id": "20"}, "scope": "multiple"}
+
+    # Ist nichts ungelesen, wird nichts gesendet
+    count = len(sent)
+    assert http.post(f"/api/thread/{sub}/read", json={"message_id": "20"}).json()["changed"] is False
+    assert len(sent) == count
+
+
 def test_login_rate_limit(client):
     http, _ = client
     for _ in range(5):

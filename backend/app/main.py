@@ -338,6 +338,21 @@ async def thread(subscription_id: str, before: str | None = None) -> dict[str, A
         raise HTTPException(status_code=502, detail=f"Nachrichten konnten nicht geladen werden: {exc}") from exc
 
 
+@app.post("/api/thread/{subscription_id}/read", dependencies=[Depends(require_owner)])
+async def thread_read(subscription_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Unterhaltung in Schulmanager als gelesen markieren (die Ansicht ruft das nach dem Anzeigen auf)."""
+    message_id = str(body.get("message_id") or "")
+    if not message_id.isdigit():
+        raise HTTPException(status_code=400, detail="Ungültige Nachrichten-ID")
+    try:
+        return await service.mark_thread_read(subscription_id, message_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden") from exc
+    except SchulmanagerError as exc:
+        log.warning("Als gelesen markieren fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Konnte nicht als gelesen markiert werden: {exc}") from exc
+
+
 @app.get("/api/events", dependencies=[Depends(require_auth)])
 async def events(before: int | None = None, limit: int = 40) -> dict[str, Any]:
     return {"items": service.db.events(min(limit, 100), before), "unseen": service.db.unseen_count()}

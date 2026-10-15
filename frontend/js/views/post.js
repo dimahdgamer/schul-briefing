@@ -100,7 +100,7 @@ async function renderThread(main, subscriptionId, ctx) {
     <div class="btn-row thread-actions">
       <a class="btn small" href="${esc(thread.url)}" target="_blank" rel="noopener">${icon("arrow-right", "sm")}In Schulmanager öffnen</a>
     </div>
-    <p class="foot-status">Hier zu lesen ändert nichts am Gelesen-Status in Schulmanager. Antworten geht noch nur dort.</p>`;
+    <p class="foot-status">Beim Öffnen gilt die Unterhaltung in Schulmanager als gelesen. Antworten geht noch nur dort.</p>`;
 
   const list = main.querySelector(".msgs");
   const moreBox = main.querySelector(".thread-more");
@@ -129,6 +129,16 @@ async function renderThread(main, subscriptionId, ctx) {
 
   draw();
   requestAnimationFrame(() => list.lastElementChild?.scrollIntoView({ block: "end" })); // die neueste Nachricht zuerst
+
+  // Wie in Schulmanager: Wer die Unterhaltung öffnet, hat sie gelesen. Markiert wird bis zur neuesten angezeigten Nachricht.
+  if (thread.unread > 0 && items.length) {
+    const foot = main.querySelector(".foot-status");
+    api(`${path}/read`, { method: "POST", body: { message_id: items[items.length - 1].id } })
+      .then(() => {
+        foot.textContent = "In Schulmanager als gelesen markiert. Antworten geht noch nur dort.";
+      })
+      .catch((error) => toast(error.message || "Konnte nicht als gelesen markiert werden.", "error"));
+  }
 }
 
 // ── Liste ────────────────────────────────────────────────────────────
@@ -164,5 +174,5 @@ export async function render(main, params, ctx) {
       <h2 class="section-title">Nachrichten <span class="aside">${data.threads.length}</span></h2>
       ${data.threads.length ? `<ul class="list">${data.threads.slice(0, 30).map(threadRow).join("")}</ul>` : '<div class="empty">Keine Nachrichten vorhanden.</div>'}
     </section>
-    <p class="foot-status">Nachrichten lassen sich hier lesen, ohne dass sie in Schulmanager als gelesen gelten. Briefe öffnen in Schulmanager, erst dort gilt ein Brief als gelesen.</p>`;
+    <p class="foot-status">Nachrichten öffnen hier und gelten in Schulmanager dann als gelesen. Briefe öffnen in Schulmanager, erst dort gilt ein Brief als gelesen.</p>`;
 }

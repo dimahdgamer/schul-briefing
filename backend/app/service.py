@@ -120,8 +120,8 @@ class AppService:
     async def thread(self, subscription_id: str, before: str | None = None) -> dict[str, Any]:
         """Eine Unterhaltung mit ihren Nachrichten: die neuesten 20, mit `before` (Nachrichten-ID) die davor.
 
-        Nur lesend. `get-messages-by-subscription` liefert die Nachrichten, als gelesen markiert wird erst mit
-        einem eigenen Aufruf der Website (`set-subscription-read`), den diese App nie sendet. Es gibt nur
+        Nur lesend: `get-messages-by-subscription` ändert den Gelesen-Status nicht (live geprüft). Gelesen wird
+        erst mit `mark_thread_read` markiert, das die Ansicht nach dem Anzeigen aufruft. Es gibt nur
         Unterhaltungen aus dem letzten Abruf (`LookupError` sonst), keine frei gewählte Nummer."""
         thread = next((t for t in self.snap("threads") if t.get("subscription_id") == subscription_id), None)
         if thread is None:
@@ -139,6 +139,31 @@ class AppService:
             raw, own_id = result.data, client.user.get("id")
         meta = {key: thread.get(key) for key in ("subscription_id", "subject", "sender", "recipients", "url", "unread")}
         return {"thread": meta, **normalize.messages(raw, own_id)}
+
+    async def mark_thread_read(self, subscription_id: str, message_id: str) -> dict[str, Any]:
+        """Eine Unterhaltung in Schulmanager als gelesen markieren, so wie es die Website beim Öffnen tut:
+        `set-subscription-read` bis zur neuesten angezeigten Nachricht (`scope: multiple`).
+
+        Das ist das Einzige, was die App bei den Nachrichten schreibt. Ist nichts ungelesen, wird nichts gesendet.
+        Danach steht die Unterhaltung auch im lokalen Stand auf gelesen, damit Liste und Zähler sofort stimmen."""
+        threads = self.snap("threads")
+        thread = next((t for t in threads if t.get("subscription_id") == subscription_id), None)
+        if thread is None:
+            raise LookupError(subscription_id)
+        if not thread.get("unread"):
+            return {"unread": 0, "changed": False}
+        if self.sync.demo is not None:
+            self.sync.demo.mark_read(subscription_id)
+        else:
+            client = self.sync.client
+            if client is None:
+                raise SchulmanagerError("Kein Schulmanager-Konto verbunden.", 0)
+            parameters = {"subscription": {"id": subscription_id}, "message": {"id": message_id}, "scope": "multiple"}
+            (result,) = await client.calls([RpcCall("messenger", "set-subscription-read", parameters)])
+            if not result.ok:
+                raise SchulmanagerError(f"Schulmanager hat die Unterhaltung nicht als gelesen markiert (HTTP {result.status}).", result.status)
+        self.db.save_snapshot("threads", [dict(t, unread=0) if t is thread else t for t in threads])
+        return {"unread": 0, "changed": True}
 
     def unread_counts(self) -> tuple[int, int]:
         letters = sum(1 for l in self.snap("letters") if l.get("unread"))

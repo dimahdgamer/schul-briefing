@@ -146,6 +146,14 @@ class DemoSource:
             return {"messages": [m for m in everything if int(m["id"]) < int(before)], "hasMoreMessages": False}
         return {"messages": everything[1:], "hasMoreMessages": True}
 
+    def mark_read(self, subscription_id: str) -> None:
+        """Eine Demo-Unterhaltung als gelesen markieren (wie `set-subscription-read`)."""
+        state = self.db.get(STATE_KEY) or {}
+        for sub in state.get("threads", []):
+            if str(sub["id"]) == str(subscription_id):
+                sub["unreadCount"] = 0
+        self.db.set(STATE_KEY, state)
+
     def _next_id(self, state: dict[str, Any]) -> int:
         state["next_id"] += 1
         return state["next_id"]
