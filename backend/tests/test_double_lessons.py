@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -161,8 +161,10 @@ def client(tmp_path, monkeypatch):
     return http, main
 
 
-def test_day_week_and_calendar_show_the_double_lesson_once(client):
+def test_day_week_and_calendar_show_the_double_lesson_once(client, monkeypatch):
     http, main = client
+    # "Heute" festhalten: Die Wochenansicht liest nur nahe Wochen aus dem Speicher, sonst ginge sie live zu Schulmanager
+    monkeypatch.setattr(main._current.get(), "now", lambda: datetime(2026, 10, 6, 12, 0, tzinfo=main.cfg.tz))
     main.service.db.save_snapshot("lessons", normalize.lessons([
         raw(DAY, "3"), raw(DAY, "4"), raw(DAY, "7", "Mathematik", "Herold", "N 16")]))
 

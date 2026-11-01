@@ -740,7 +740,7 @@ def test_day_stays_on_thursday_until_russian_is_over(client, monkeypatch):
     from datetime import datetime
 
     http, main = client
-    service = main.service
+    service = main._current.get()  # das echte Objekt: monkeypatch kann am Stellvertreter `main.service` nichts zurücksetzen
     http.post("/api/login", json={"password": "geheim"})
     http.post("/api/own/courses", json=COURSE)
     main.service.db.save_snapshot("lessons", [
