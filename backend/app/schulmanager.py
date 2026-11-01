@@ -65,6 +65,22 @@ class RpcResult:
         return 200 <= self.status < 300
 
 
+def _token_expired(resp: httpx.Response) -> bool:
+    """Ist das Token abgelaufen? Schulmanager meldet das meist im Ergebnis einzelner Aufrufe (HTTP 200 mit
+    `status: 401` pro Aufruf), nicht nur über den HTTP-Status der ganzen Anfrage. Sonst bliebe die App
+    mit dem alten Token hängen und jeder Abruf schlüge fehl."""
+    if resp.status_code == 401:
+        return True
+    if resp.status_code >= 400:
+        return False
+    try:
+        envelope = resp.json()
+    except ValueError:
+        return False
+    results = envelope.get("results", []) if isinstance(envelope, dict) else envelope
+    return isinstance(results, list) and any(isinstance(r, dict) and str(r.get("status")) == "401" for r in results)
+
+
 def salted_hash(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac(
         "sha512", password.encode("utf-8"), salt.encode("utf-8"), PBKDF2_ITERATIONS, PBKDF2_BYTES
@@ -212,7 +228,7 @@ class SchulmanagerClient:
 
             body = {"bundleVersion": BUNDLE_VERSION, "requests": [c.payload() for c in calls]}
             resp = await self._post("/api/calls", body)
-            if resp.status_code == 401:
+            if _token_expired(resp):
                 log.info("Token abgelaufen, melde neu an")
                 await self.login()
                 resp = await self._post("/api/calls", body)

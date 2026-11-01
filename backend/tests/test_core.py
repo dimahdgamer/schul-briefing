@@ -744,3 +744,38 @@ def test_client_keeps_the_user_error_of_a_call():
     assert not first.ok and first.error == {"errorType": "quiet_hours_active", "germanErrorMessage": "Ruhezeit"}
     assert second.ok and second.error is None and second.data == [1]
     assert not third.ok and third.error is None  # nur echte Fehlerobjekte zählen
+
+
+def test_expired_token_seen_only_in_single_results_triggers_relogin():
+    """Schulmanager antwortet mit HTTP 200, meldet aber pro Aufruf 401: Die App muss neu anmelden und
+    den Aufruf wiederholen, statt mit dem alten Token alle Abrufe scheitern zu lassen."""
+    import asyncio
+
+    from app.schulmanager import RpcCall, SchulmanagerClient
+
+    class Response:
+        def __init__(self, status_code, body):
+            self.status_code, self._body, self.headers = status_code, body, {}
+
+        def json(self):
+            return self._body
+
+    expired = Response(200, {"results": [{"status": 401}, {"status": 200, "data": [1]}]})
+    fresh = Response(200, {"results": [{"status": 200, "data": [2]}]})
+    seen, logins = [], []
+
+    client = SchulmanagerClient("a", "b")
+    client.token, client.user = "t", {"id": 1}
+
+    async def post(path, body, auth=True):
+        seen.append(path)
+        return expired if seen.count("/api/calls") == 1 else fresh
+
+    async def login():
+        logins.append(True)
+        client.token, client.user = "neu", {"id": 1}
+
+    client._post = post
+    client.login = login
+    (result,) = asyncio.run(client.calls([RpcCall("m", "a")]))
+    assert logins == [True] and result.ok and result.data == [2]
