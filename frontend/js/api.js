@@ -30,7 +30,13 @@ export async function api(path, { method = "GET", body } = {}) {
     throw new ApiError(401, "Nicht angemeldet");
   }
   if (!response.ok) {
-    throw new ApiError(response.status, (data && data.detail) || `Fehler ${response.status}`);
+    // Ohne JSON-Antwort kommt die Seite vom Proxy (nginx/Cloudflare), die App selbst läuft gerade nicht
+    const message = data && data.detail
+      ? data.detail
+      : response.status === 502 || response.status === 503 || response.status === 504
+        ? `Der Server antwortet gerade nicht (${response.status}). Bitte gleich noch einmal versuchen.`
+        : `Fehler ${response.status}`;
+    throw new ApiError(response.status, message);
   }
   return data;
 }
