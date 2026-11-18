@@ -31,15 +31,14 @@ function dayColumn(day, todayIso, index) {
       return `<li class="is-${esc(l.state)}" title="${esc([l.subject, l.teacher, l.room].filter(Boolean).join(" · "))}">
         <span class="h">${esc(l.hour)}</span><span class="s">${esc(l.subject)}</span><span class="r">${esc(label || "")}</span></li>`;
     };
-    // Klausuren und Termine mit Uhrzeit stehen dort, wo sie zeitlich liegen: zwischen den Stunden, nicht darüber.
-    // Bei gleichem Beginn kommt die Klausur zuerst, ganztägige Termine ganz unten mit Abstand.
+    // Klausuren stehen dort, wo sie zeitlich liegen: zwischen den Stunden, nicht darüber.
+    // Alle Kalendertermine (ganztägig oder mit Uhrzeit) stehen darunter, mit Abstand zum Unterricht.
     const timeline = [
       ...day.lessons.map((l) => ({ at: l.start || "99:99", rank: 2, html: lessonRow(l) })),
       ...day.exams.map((e) => ({ at: e.start || "00:00", rank: 0, html: examRow(e) })),
-      ...day.events.filter((ev) => !ev.all_day).map((ev) => ({ at: ev.start.slice(11, 16) || "00:00", rank: 1, html: eventRow(ev) })),
     ].sort((a, b) => a.at.localeCompare(b.at) || a.rank - b.rank).map((x) => x.html).join("");
-    const allDay = day.events.filter((ev) => ev.all_day).map(eventRow).join("");
-    body = `${leaves || timeline ? `<ul class="mini">${leaves}${timeline}</ul>` : ""}${allDay ? `<ul class="mini week-allday">${allDay}</ul>` : ""}`;
+    const eventList = day.events.map(eventRow).join("");
+    body = `${leaves || timeline ? `<ul class="mini">${leaves}${timeline}</ul>` : ""}${eventList ? `<ul class="mini week-allday">${eventList}</ul>` : ""}`;
   }
   return `<div class="week-day reveal ${isToday ? "is-today" : ""}" style="--i:${index}" id="d-${esc(day.date)}">
     <a href="#/heute${query({ date: day.date })}" style="text-decoration:none;color:inherit">${head}</a>${body}</div>`;
