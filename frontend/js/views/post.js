@@ -359,12 +359,12 @@ export async function render(main, params, ctx) {
       ${unreadLetters + unreadMessages ? `<span class="aside">${unreadLetters + unreadMessages} ungelesen</span>` : ""}
     </header>
     <section class="section reveal" style="--i:1">
-      <h2 class="section-title">Elternbriefe <span class="aside">${data.letters.length}</span></h2>
-      ${data.letters.length ? `<ul class="list">${data.letters.slice(0, 30).map(letterRow).join("")}</ul>` : '<div class="empty">Keine Briefe vorhanden.</div>'}
-    </section>
-    <section class="section reveal" style="--i:2">
       <h2 class="section-title">Nachrichten <span class="aside">${data.threads.length}</span></h2>
       ${data.threads.length ? `<ul class="list">${data.threads.slice(0, 30).map(threadRow).join("")}</ul>` : '<div class="empty">Keine Nachrichten vorhanden.</div>'}
+    </section>
+    <section class="section reveal" style="--i:2">
+      <h2 class="section-title">Elternbriefe <span class="aside">${data.letters.length}</span></h2>
+      ${data.letters.length ? `<ul class="list">${data.letters.slice(0, 30).map(letterRow).join("")}</ul>` : '<div class="empty">Keine Briefe vorhanden.</div>'}
     </section>
     <p class="foot-status">Nachrichten öffnen hier und gelten in Schulmanager dann als gelesen. Briefe öffnen in Schulmanager, erst dort gilt ein Brief als gelesen.</p>`;
 }

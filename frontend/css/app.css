@@ -1803,6 +1803,9 @@ kbd {
 .mini li.exam-row {
   background: var(--surface-2);
 }
+.mini.week-allday {
+  margin-top: 12px; /* ganztägige Termine stehen abgesetzt unter dem Unterricht */
+}
 .week-holiday {
   padding: 14px;
   border: 1px dashed var(--border-strong);

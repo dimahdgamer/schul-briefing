@@ -381,6 +381,11 @@ class AppService:
             current -= timedelta(days=1)
         return day - timedelta(days=1)
 
+    @staticmethod
+    def _exam_span(exam: dict[str, Any]) -> str:
+        """Stunden einer Klausur für die Wochenansicht: '3–5'. Leer, wenn sie in kein Stundenraster passt."""
+        return bell.hour_span(exam.get("start") or "", exam.get("end") or "")
+
     async def week(self, monday: date) -> dict[str, Any]:
         monday = monday - timedelta(days=monday.weekday())
         friday = monday + timedelta(days=4)
@@ -407,7 +412,7 @@ class AppService:
                 # Die Klausur steht als eigene Zeile bei den Arbeiten, nicht noch einmal bei den Stunden
                 "lessons": [l for l in lessons if l["date"] == iso and l["state"] != "exam"],
                 "leaves": own.leaves_on(leaves, iso),
-                "exams": [e for e in exams if e["date"] == iso],
+                "exams": [dict(e, span=self._exam_span(e)) for e in exams if e["date"] == iso],
                 "events": [e for e in events if not e["is_holiday"] and e["start"][:10] <= iso <= (e["end"] or e["start"])[:10]],
             })
         return {"monday": monday.isoformat(), "days": days, "source": source, "today": self.today().isoformat(),
@@ -532,7 +537,7 @@ class AppService:
             "error": (status.get("module_errors") or {}).get("absences"),
             "fetched_at": self.db.snapshot_time("absences"),
             **(data or {"items": [], "by_subject": [], "totals": {"absent": 0, "unexcused": 0, "total": 0},
-                        "unexcused_entries": 0, "has_list": False, "has_statistics": False}),
+                        "unexcused_entries": 0, "late_entries": 0, "has_list": False, "has_statistics": False}),
         }
 
     # ── Status ───────────────────────────────────────────────────────

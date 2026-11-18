@@ -364,6 +364,19 @@ def _span(start: str, end: str) -> str:
     return "ganztägig"
 
 
+LATE_LIMIT_MINUTES = 45  # kürzer als eine Stunde: Verspätung, die sich nicht entschuldigen lässt
+
+
+def _minutes(hhmm: str) -> int:
+    hours, minutes = hhmm.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def is_late(start: str, end: str) -> bool:
+    """Eine Fehlzeit mit Beginn und Ende, die kürzer als 45 Minuten ist, ist eine Verspätung."""
+    return bool(start and end and 0 <= _minutes(end) - _minutes(start) < LATE_LIMIT_MINUTES)
+
+
 def _subject_name(item: dict[str, Any]) -> str:
     subject = item.get("subject")
     name = _s(subject.get("name")) if isinstance(subject, dict) else _s(subject)
@@ -399,7 +412,10 @@ def absences(raw: Any) -> dict[str, Any]:
         if not info:
             info.append("Grund unbekannt")
 
+        late = is_late(start, end) and not sick and not exemption
         marks = []
+        if late:
+            marks.append("Verspätung")  # lässt sich nicht entschuldigen, bleibt also nie "offen"
         if sick:
             marks.append(CERTIFICATE_LABEL.get(_s(sick.get("certificateType")), "Unentschuldigt"))
         if exemption:
@@ -408,7 +424,7 @@ def absences(raw: Any) -> dict[str, Any]:
             marks.append("Entschuldigt")
         if not marks:
             marks.append("Unentschuldigt")
-        unexcused = all(m == "Unentschuldigt" for m in marks)
+        unexcused = not late and all(m == "Unentschuldigt" for m in marks)
 
         items.append({
             "id": "ab-" + _short_hash(day, start, end),
@@ -419,6 +435,7 @@ def absences(raw: Any) -> dict[str, Any]:
             "info": info,
             "marks": marks,
             "unexcused": unexcused,
+            "late": late,
         })
     items.sort(key=lambda a: (a["date"], a["start"]), reverse=True)
 
@@ -448,6 +465,7 @@ def absences(raw: Any) -> dict[str, Any]:
             "total": sum(s["total"] for s in by_subject),
         },
         "unexcused_entries": sum(1 for a in items if a["unexcused"]),
+        "late_entries": sum(1 for a in items if a["late"]),
         "has_list": raw.get("list") is not None,
         "has_statistics": raw.get("statistics") is not None,
     }

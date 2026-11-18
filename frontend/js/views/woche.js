@@ -14,20 +14,32 @@ function dayColumn(day, todayIso, index) {
   } else if (!day.lessons.length && !day.exams.length && !day.events.length && !day.leaves.length) {
     body = `<div class="week-holiday">Kein Unterricht eingetragen</div>`;
   } else {
-    const exams = day.exams.map((e) => `
-      <li class="exam-row"><span class="h">${icon("exam", "sm")}</span><span class="s">${esc(e.subject)}</span><span class="r">${esc([e.type, e.hour ? e.hour + ". Std" : e.manual && e.end ? `${e.start}–${e.end}` : e.start].filter(Boolean).join(" · "))}</span></li>`).join("");
+    const examRow = (e) => {
+      const hours = e.span || (e.hour ? e.hour.replace("/", "–") : "");
+      const time = e.start && e.end ? `${e.start}–${e.end}` : e.start || "";
+      const right = [e.type, hours ? "" : time].filter(Boolean).join(" · ");
+      return `<li class="exam-row" title="${esc([e.subject, e.type, time].filter(Boolean).join(" · "))}"><span class="h">${esc(hours || "")}</span><span class="s">${icon("exam", "sm")} ${esc(e.subject)}</span><span class="r">${esc(right)}</span></li>`;
+    };
     // Eine Beurlaubung ohne Stundenplan-Daten (weit voraus) soll trotzdem sichtbar sein
     const leaves = day.leaves
       .filter((l) => !day.lessons.some((x) => x.state === "leave"))
       .map((l) => `<li class="is-leave"><span class="h">${icon("door-open", "sm")}</span><span class="s">Beurlaubt</span><span class="r">${esc(l.hours || "ganztägig")}</span></li>`).join("");
-    const events = day.events.map((ev) => `
-      <li><span class="h">${icon("calendar-dots", "sm")}</span><span class="s">${esc(ev.title)}</span><span class="r">${ev.all_day ? "" : esc(ev.start.slice(11, 16))}</span></li>`).join("");
-    const lessons = day.lessons.map((l) => {
+    const eventRow = (ev) => `
+      <li><span class="h">${icon("calendar-dots", "sm")}</span><span class="s">${esc(ev.title)}</span><span class="r">${ev.all_day ? "" : esc(ev.start.slice(11, 16))}</span></li>`;
+    const lessonRow = (l) => {
       const label = l.state === "cancelled" ? "Entfall" : l.state === "eva" ? "EVA" : l.state === "leave" ? "Beurlaubt" : l.state === "substitution" ? `Vertr. ${l.teacher || ""}` : l.room;
       return `<li class="is-${esc(l.state)}" title="${esc([l.subject, l.teacher, l.room].filter(Boolean).join(" · "))}">
         <span class="h">${esc(l.hour)}</span><span class="s">${esc(l.subject)}</span><span class="r">${esc(label || "")}</span></li>`;
-    }).join("");
-    body = `<ul class="mini">${events}${exams}${leaves}${lessons}</ul>`;
+    };
+    // Klausuren und Termine mit Uhrzeit stehen dort, wo sie zeitlich liegen: zwischen den Stunden, nicht darüber.
+    // Bei gleichem Beginn kommt die Klausur zuerst, ganztägige Termine ganz unten mit Abstand.
+    const timeline = [
+      ...day.lessons.map((l) => ({ at: l.start || "99:99", rank: 2, html: lessonRow(l) })),
+      ...day.exams.map((e) => ({ at: e.start || "00:00", rank: 0, html: examRow(e) })),
+      ...day.events.filter((ev) => !ev.all_day).map((ev) => ({ at: ev.start.slice(11, 16) || "00:00", rank: 1, html: eventRow(ev) })),
+    ].sort((a, b) => a.at.localeCompare(b.at) || a.rank - b.rank).map((x) => x.html).join("");
+    const allDay = day.events.filter((ev) => ev.all_day).map(eventRow).join("");
+    body = `${leaves || timeline ? `<ul class="mini">${leaves}${timeline}</ul>` : ""}${allDay ? `<ul class="mini week-allday">${allDay}</ul>` : ""}`;
   }
   return `<div class="week-day reveal ${isToday ? "is-today" : ""}" style="--i:${index}" id="d-${esc(day.date)}">
     <a href="#/heute${query({ date: day.date })}" style="text-decoration:none;color:inherit">${head}</a>${body}</div>`;

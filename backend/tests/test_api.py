@@ -784,3 +784,10 @@ def test_school_events_have_their_own_calendar(client):
     assert "SUMMARY:Elternsprechtag" in events and "Physik" not in events and "X-WR-CALNAME:Schultermine" in events
     # Vom Besucher gesendeter Parameter ersetzt das Geheimnis nicht
     assert http.get("/cal/falsch.ics?termine=1").status_code == 404
+
+
+def test_week_exam_names_the_hours_it_covers():
+    from app.service import AppService
+
+    assert AppService._exam_span({"start": "09:45", "end": "12:20"}) == "3–5"
+    assert AppService._exam_span({"start": "", "end": ""}) == ""

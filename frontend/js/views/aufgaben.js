@@ -141,13 +141,13 @@ function leavesView(data) {
 // ── Fehlzeiten aus dem Klassenbuch ───────────────────────────────────
 
 function markTag(mark) {
-  return `<span class="tag ${mark === "Unentschuldigt" ? "red" : "green"}">${esc(mark)}</span>`;
+  return `<span class="tag ${mark === "Unentschuldigt" ? "red" : mark === "Verspätung" ? "" : "green"}">${esc(mark)}</span>`;
 }
 
 function absenceRow(a, i) {
   return `
     <li class="row reveal" style="--i:${i}">
-      <span class="row-icon ${a.unexcused ? "red" : "green"}">${icon(a.unexcused ? "warning-circle" : "check")}</span>
+      <span class="row-icon ${a.unexcused ? "red" : a.late ? "" : "green"}">${icon(a.unexcused ? "warning-circle" : a.late ? "clock-counter-clockwise" : "check")}</span>
       <div class="row-main">
         <div class="row-title">${esc(shortDate(a.date))}<span class="fz-span">${esc(a.span)}</span></div>
         <div class="row-sub">${esc(a.info.join(" · "))}</div>
@@ -167,7 +167,8 @@ function absencesView(data, onlyUnexcused) {
   }
   const totals = data.totals;
   const open = data.items.filter((a) => a.unexcused);
-  const done = data.items.filter((a) => !a.unexcused);
+  const late = data.items.filter((a) => a.late && !a.unexcused);
+  const done = data.items.filter((a) => !a.unexcused && !a.late);
   const parts = [];
   parts.push(`
     <div class="bento reveal">
@@ -189,6 +190,11 @@ function absencesView(data, onlyUnexcused) {
       <ul class="list">${open.map(absenceRow).join("")}</ul></section>`);
   } else {
     parts.push(`<div class="notice green reveal">${icon("check")}<p>Alle Fehlzeiten sind entschuldigt.</p></div>`);
+  }
+  if (!onlyUnexcused && late.length) {
+    parts.push(`<section class="section"><h2 class="section-title">Verspätungen<span class="aside">${late.length}</span></h2>
+      <p class="muted">Unter 45 Minuten. Eine Verspätung lässt sich nicht entschuldigen.</p>
+      <ul class="list">${late.map(absenceRow).join("")}</ul></section>`);
   }
   if (!onlyUnexcused && done.length) {
     parts.push(`<section class="section"><h2 class="section-title">Entschuldigt<span class="aside">${done.length}</span></h2>

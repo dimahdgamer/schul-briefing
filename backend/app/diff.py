@@ -274,7 +274,7 @@ def diff_absences(prev: dict[str, Any] | None, curr: dict[str, Any], today: date
         return []
 
     def line(a: dict[str, Any]) -> str:
-        status = "unentschuldigt" if a["unexcused"] else ", ".join(a["marks"]).lower()
+        status = "unentschuldigt" if a["unexcused"] else ", ".join(a["marks"]).lower()  # "verspätung" steht in marks
         return f"{fmt.short_date(a['date'])}, {a['span']}: {status}"
 
     if len(new) == 1:

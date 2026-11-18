@@ -34,6 +34,33 @@ def build(*entries, statistics=None, unexcused=None):
 
 # ── Entschuldigungsstatus ────────────────────────────────────────────
 
+@pytest.mark.parametrize("start, end, late", [
+    ("07:55", "08:06", True),    # 11 Minuten: Verspätung
+    ("07:55", "08:39", True),    # 44 Minuten
+    ("07:55", "08:40", False),   # genau 45 Minuten: eine Stunde
+    ("07:55", "09:25", False),
+    (None, None, False),         # ohne Uhrzeit: ganztägig
+])
+def test_short_absence_is_a_lateness_and_never_open(start, end, late):
+    data = normalize.absences(build(entry(start=start, end=end)))
+    (item,) = data["items"]
+    assert item["late"] is late
+    assert item["unexcused"] is (not late)
+    assert data["unexcused_entries"] == (0 if late else 1) and data["late_entries"] == (1 if late else 0)
+    if late:
+        assert item["marks"] == ["Verspätung"]
+
+
+def test_lateness_with_sick_note_keeps_its_status():
+    (item,) = normalize.absences(build(entry(start="07:55", end="08:06", sickNote={"certificateType": "Medical"})))["items"]
+    assert not item["late"] and item["marks"] == ["Attest"]
+
+
+def test_new_lateness_is_reported_without_the_word_unexcused():
+    (change,) = diff.diff_absences(snapshot(), snapshot(entry("2026-10-05", start="07:55", end="08:06")), TODAY)
+    assert change.title == "Neue Fehlzeit" and change.body == "Mo 05.10., 07:55–08:06 Uhr: verspätung"
+
+
 def test_absence_without_any_reason_is_unexcused():
     (item,) = normalize.absences(build(entry(start="07:55", end="09:25")))["items"]
     assert item["unexcused"] and item["marks"] == ["Unentschuldigt"] and item["info"] == ["Grund unbekannt"]
