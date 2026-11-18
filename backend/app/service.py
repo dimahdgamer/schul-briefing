@@ -96,9 +96,10 @@ class AppService:
         return self.db.get(f"own_{kind}", []) or []
 
     def exams(self) -> list[dict[str, Any]]:
-        """Klassenarbeiten aus Schulmanager plus selbst eingetragene Klausuren."""
+        """Klassenarbeiten aus Schulmanager (nur die der schriftlichen Fächer, wenn angegeben) plus selbst eingetragene Klausuren."""
         mine = [own.exam_item(e) for e in self.own("exams")]
-        return sorted(self.snap("exams") + mine, key=lambda e: (e["date"], e.get("start") or ""))
+        written = normalize.written_only(self.snap("exams"), self.db.settings().get("written_subjects"))
+        return sorted(written + mine, key=lambda e: (e["date"], e.get("start") or ""))
 
     def with_own(
         self, lessons: list[dict[str, Any]], first: date | None = None, last: date | None = None
@@ -125,7 +126,9 @@ class AppService:
 
     def subjects(self) -> list[str]:
         """Fächer aus dem Stundenplan, als Vorschläge für die Eingabe."""
-        return sorted({l["subject"] for l in self.snap("lessons") if l.get("subject") and l["state"] != "event"})
+        names = {l["subject"] for l in self.snap("lessons") if l.get("subject") and l["state"] != "event"}
+        names |= {c["subject"] for c in self.own("courses")}
+        return sorted(names)
 
     # ── Tagesansicht ─────────────────────────────────────────────────
 

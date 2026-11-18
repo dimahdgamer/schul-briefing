@@ -779,3 +779,13 @@ def test_expired_token_seen_only_in_single_results_triggers_relogin():
     client.login = login
     (result,) = asyncio.run(client.calls([RpcCall("m", "a")]))
     assert logins == [True] and result.ok and result.data == [2]
+
+
+# ── Schriftliche Fächer ──────────────────────────────────────────────
+
+def test_written_only_keeps_exams_of_written_subjects():
+    exams = [{"subject": "Mathematik"}, {"subject": "Katholische Religionslehre"}, {"subject": "Geschichte"}, {"subject": ""}]
+    assert normalize.written_only(exams, []) == exams and normalize.written_only(exams, None) == exams
+    kept = normalize.written_only(exams, ["Mathematik", "Katholische Religion"])
+    assert [e["subject"] for e in kept] == ["Mathematik", "Katholische Religionslehre"]
+    assert normalize.written_only([{"subject": "Ma"}], ["Mathematik"]) == []  # zu kurz für eine Teilübereinstimmung

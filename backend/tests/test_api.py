@@ -791,3 +791,24 @@ def test_week_exam_names_the_hours_it_covers():
 
     assert AppService._exam_span({"start": "09:45", "end": "12:20"}) == "3–5"
     assert AppService._exam_span({"start": "", "end": ""}) == ""
+
+
+def test_only_written_subjects_show_exams_and_notify(client):
+    http, main = client
+    http.post("/api/login", json={"password": "geheim"})
+    plan = [{"id": "e1", "subject": "Mathematik", "type": "Klausur", "date": "2099-10-20", "start": "", "end": "", "hour": "", "comment": ""},
+            {"id": "e2", "subject": "Geschichte", "type": "Klausur", "date": "2099-10-21", "start": "", "end": "", "hour": "", "comment": ""}]
+    main.service.db.save_snapshot("exams", plan)
+    assert [e["subject"] for e in http.get("/api/exams").json()["items"]] == ["Mathematik", "Geschichte"]  # nichts gewählt: alle
+
+    saved = http.put("/api/settings", json={"written_subjects": [" Mathematik ", "Mathematik", "", "Deutsch"]}).json()
+    assert saved["written_subjects"] == ["Mathematik", "Deutsch"]
+    assert [e["subject"] for e in http.get("/api/exams").json()["items"]] == ["Mathematik"]
+
+    # Eigene Klausuren bleiben immer sichtbar, auch in einem Fach ohne Haken
+    http.post("/api/own/exams", json={"subject": "Geschichte", "date": "2099-10-22", "start": "08:00", "end": "09:25"})
+    assert [e["subject"] for e in http.get("/api/exams").json()["items"]] == ["Mathematik", "Geschichte"]
+
+    # Keine Meldung über die Geschichte-Arbeit, wohl über die Mathe-Arbeit
+    new = main.service.sync._diff("exams", [], plan, date(2099, 10, 1))
+    assert [c.title for c in new] == ["Neue Klausur: Mathematik"]

@@ -341,6 +341,19 @@ def exams(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _same_subject(a: str, b: str) -> bool:
+    """Gleiches Fach trotz leicht anderer Schreibweise ("Katholische Religion" / "Katholische Religionslehre")."""
+    a, b = " ".join(a.casefold().split()), " ".join(b.casefold().split())
+    return bool(a and b) and (a == b or (min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a))))
+
+
+def written_only(exam_list: list[dict[str, Any]], subjects: list[str] | None) -> list[dict[str, Any]]:
+    """Nur Klassenarbeiten der Fächer, in denen man schreibt. Ohne Angabe bleibt alles, wie es ist."""
+    if not subjects:
+        return exam_list
+    return [e for e in exam_list if any(_same_subject(e.get("subject") or "", name) for name in subjects)]
+
+
 # ── Fehlzeiten ───────────────────────────────────────────────────────
 
 # So zeigt der Schulmanager die Bescheinigung einer Krankmeldung an (certificateType)

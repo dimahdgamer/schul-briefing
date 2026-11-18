@@ -320,7 +320,10 @@ class SyncService:
         if module == "homework":
             return diff.diff_homework(previous, items, today)
         if module == "exams":
-            return diff.diff_exams(previous, items, today)
+            # Keine Meldung über Klassenarbeiten in Fächern, in denen man nicht schreibt
+            subjects = self.db.settings().get("written_subjects")
+            written = lambda data: None if data is None else normalize.written_only(data, subjects)  # noqa: E731
+            return diff.diff_exams(written(previous), written(items), today)
         if module == "letters":
             return diff.diff_letters(previous, items)
         if module == "threads":

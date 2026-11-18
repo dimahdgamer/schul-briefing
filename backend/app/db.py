@@ -82,6 +82,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notify_messages": True,
     "notify_calendar": True,
     "notify_absences": True,
+    # Fächer mit Klausur. Leer: alle Klassenarbeiten aus Schulmanager zeigen. Sonst nur die dieser Fächer.
+    "written_subjects": [],
     "poll_interval": 15,
     "poll_start": "06:00",
     "poll_end": "21:30",
@@ -171,6 +173,9 @@ class Database:
                 number = int(value)
                 low, high = SETTING_LIMITS.get(key, (number, number))
                 current[key] = max(low, min(high, number))
+            elif key == "written_subjects":
+                names = [" ".join(str(v).split())[:60] for v in (value if isinstance(value, list) else [])]
+                current[key] = list(dict.fromkeys(n for n in names if n))[:30]
             elif isinstance(default, list):
                 days = sorted({int(v) for v in value if 0 < int(v) <= 60}, reverse=True)
                 current[key] = days

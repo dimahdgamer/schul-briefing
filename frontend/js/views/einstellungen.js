@@ -301,6 +301,19 @@ export async function render(main, params, ctx) {
       </div>
     </div>`;
 
+  // Fächer zum Auswählen: die aus dem Stundenplan plus die schon gewählten (auch wenn sie dort nicht mehr vorkommen)
+  const written = s.written_subjects || [];
+  const subjectChoices = [...new Set([...(own.subjects || []), ...written])].sort((a, b) => a.localeCompare(b, "de"));
+  const writtenCard = `
+    <div class="card">
+      <div class="field stack">
+        <div class="field-help">Wähle die Fächer, in denen du Klausuren schreibst. Klassenarbeiten aus Schulmanager in allen anderen Fächern werden dann ausgeblendet, auch bei Erinnerungen und Meldungen. Nichts gewählt: alle werden gezeigt. Eigene Klausuren bleiben immer sichtbar.</div>
+        <div class="chips" role="group" aria-label="Schriftliche Fächer">
+          ${subjectChoices.map((name) => `<button class="chip" type="button" data-written="${esc(name)}" aria-pressed="${written.includes(name)}">${esc(name)}</button>`).join("") || '<span class="field-help">Noch keine Fächer bekannt, sie erscheinen nach dem ersten Abruf.</span>'}
+        </div>
+      </div>
+    </div>`;
+
   main.innerHTML = `
     <header class="page-head reveal">
       <h1 class="page-title">Einstellungen</h1>
@@ -311,6 +324,8 @@ export async function render(main, params, ctx) {
       <div class="card"><p class="group-label">Sofort melden bei</p>${notifyRows}</div>`)}
 
     ${group("briefing", "Morgen-Briefing", briefingSection(s, status, bell))}
+
+    ${group("schriftlich", "Schriftliche Fächer", writtenCard)}
 
     ${group("erinnerungen", "Klausur-Erinnerungen", reminders)}
 
@@ -453,6 +468,17 @@ export async function render(main, params, ctx) {
         .filter((c) => c.getAttribute("aria-pressed") === "true")
         .map((c) => Number(c.dataset.day));
       save({ reminder_days: days });
+    });
+  });
+
+  main.querySelectorAll("[data-written]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      chip.setAttribute("aria-pressed", String(chip.getAttribute("aria-pressed") !== "true"));
+      save({
+        written_subjects: [...main.querySelectorAll("[data-written]")]
+          .filter((c) => c.getAttribute("aria-pressed") === "true")
+          .map((c) => c.dataset.written),
+      });
     });
   });
 
